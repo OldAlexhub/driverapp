@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
+import { distanceBetween, metersToMiles, mphToMetersPerSecond, secondsToMinutes } from '@/src/utils/geo';
 import * as Location from 'expo-location';
-import { distanceBetween, metersToMiles, secondsToMinutes, mphToMetersPerSecond } from '@/src/utils/geo';
+import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
+import { AppState } from 'react-native';
 
 export type MeterStatus = 'idle' | 'running' | 'paused' | 'completed';
 
@@ -161,6 +162,20 @@ function meterReducer(state: MeterState, action: MeterAction): MeterState {
           },
         ) > 5;
 
+      const newPoints = shouldStorePoint
+        ? [
+            ...state.points,
+            {
+              latitude: location.coords.latitude,
+              longitude: location.coords.longitude,
+            },
+          ]
+        : state.points;
+
+      // Cap stored polyline points to avoid unbounded memory growth on long trips
+      const MAX_POINTS = 500;
+      const cappedPoints = newPoints.length > MAX_POINTS ? newPoints.slice(newPoints.length - MAX_POINTS) : newPoints;
+
       return {
         ...state,
         lastLocation: location,
@@ -169,15 +184,7 @@ function meterReducer(state: MeterState, action: MeterAction): MeterState {
         distanceMeters,
         waitSeconds,
         idleAnchor,
-        points: shouldStorePoint
-          ? [
-              ...state.points,
-              {
-                latitude: location.coords.latitude,
-                longitude: location.coords.longitude,
-              },
-            ]
-          : state.points,
+        points: cappedPoints,
       };
     }
     case 'PAUSE': {
@@ -238,6 +245,21 @@ export function useFlagdownMeter() {
   }, []);
 
   const ensurePermission = useCallback(async () => {
+    // First check current permission without prompting the user. This avoids
+    // triggering the system permission dialog while the app is backgrounded
+    // (which causes Android to block the background activity and can lead
+    // to ANRs). If permission is not granted and the app is not foregrounded,
+    // return a clear error to the caller so the UI can instruct the user to
+    // foreground the app and try again.
+    const current = await Location.getForegroundPermissionsAsync();
+    if (current.status === Location.PermissionStatus.GRANTED) return;
+
+    // If we are not in the foreground, don't prompt — that will attempt to
+    // start an activity from background and Android will block it.
+    if (AppState.currentState !== 'active') {
+      throw new Error('Location permission is required. Please bring the app to the foreground and try again.');
+    }
+
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== Location.PermissionStatus.GRANTED) {
       throw new Error('Location permission is required to start the meter.');
@@ -254,8 +276,16 @@ export function useFlagdownMeter() {
         mayShowUserSettingsDialog: true,
       },
       (location) => {
-        if (!isMounted.current) return;
-        dispatch({ type: 'LOCATION_UPDATE', payload: { location } });
+        try {
+          if (!isMounted.current) return;
+          dispatch({ type: 'LOCATION_UPDATE', payload: { location } });
+        } catch (err) {
+          // Protect against unexpected errors in reducer or location payloads
+          // so the native callback doesn't cause an unhandled exception.
+          // Store a brief error message in state for diagnostics.
+          const message = err instanceof Error ? err.message : String(err);
+          dispatch({ type: 'SET_ERROR', payload: `Location watch error: ${message}` });
+        }
       },
     );
   }, []);
@@ -272,11 +302,15 @@ export function useFlagdownMeter() {
       }
       try {
         await ensurePermission();
-        const initialLocation = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.BestForNavigation,
-          mayShowUserSettingsDialog: true,
-        });
-        const timestamp = initialLocation.timestamp ?? Date.now();
+        // Try to get an initial location but don't block indefinitely.
+        // Use a short timeout so the UI remains responsive on devices with
+        // slow GPS or when running in environments without a GPS fix.
+        const initialLocation =
+          (await Promise.race([
+            Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.BestForNavigation, mayShowUserSettingsDialog: true }),
+            new Promise<Location.LocationObject | null>((resolve) => setTimeout(() => resolve(null), 3000)),
+          ])) ?? null;
+  const timestamp = (initialLocation?.timestamp as number | undefined) ?? Date.now();
 
         dispatch({
           type: 'START',

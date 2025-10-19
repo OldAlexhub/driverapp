@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "TaxiOps by Old Alex Hub",
+  "name": "TaxiOps",
     "slug": "taxiops",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/mipmap-xxxhdpi/ic_launcher.png",
+  "icon": "./assets/images/icon.png",
     "scheme": "driverapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -20,9 +20,8 @@
       "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#001f3f",
-        "foregroundImage": "./assets/mipmap-xxxhdpi/ic_launcher.png",
-        "backgroundImage": "./assets/mipmap-xxxhdpi/ic_launcher.png",
-        "monochromeImage": "./assets/mipmap-xxxhdpi/ic_launcher.png"
+        "foregroundImage": "./assets/images/icon-foreground.png",
+        "backgroundImage": "./assets/images/icon-background.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -37,20 +36,14 @@
       "output": "static",
       "favicon": "./assets/mipmap-xxxhdpi/ic_launcher.png"
     },
+    "splash": {
+      "image": "./assets/images/playstore.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#001f3f",
+      "imageWidth": 512
+    },
     "plugins": [
       "expo-router",
-      [
-        "expo-splash-screen",
-        {
-          "image": "./assets/images/playstore.png",
-          "imageWidth": 512,
-          "resizeMode": "contain",
-          "backgroundColor": "#001f3f",
-          "dark": {
-            "backgroundColor": "#00111a"
-          }
-        }
-      ],
       "expo-notifications"
     ],
     "experiments": {

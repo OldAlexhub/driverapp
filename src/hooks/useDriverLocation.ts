@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
 import * as Location from 'expo-location';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 
 type PermissionStatus = Location.PermissionStatus;
 
@@ -18,6 +19,19 @@ export function useDriverLocation() {
   }, []);
 
   const requestPermission = useCallback(async () => {
+    const current = await Location.getForegroundPermissionsAsync();
+    if (current.status === Location.PermissionStatus.GRANTED) {
+      setPermissionStatus(current.status);
+      return current.status;
+    }
+
+    if (AppState.currentState !== 'active') {
+      // Avoid prompting while backgrounded; caller should bring the app to
+      // foreground and try again.
+      setPermissionStatus(current.status);
+      return current.status;
+    }
+
     const { status } = await Location.requestForegroundPermissionsAsync();
     setPermissionStatus(status);
     return status;
@@ -27,7 +41,7 @@ export function useDriverLocation() {
     async (options: { distanceInterval?: number; timeInterval?: number } = {}) => {
       const status = await requestPermission();
       if (status !== Location.PermissionStatus.GRANTED) {
-        throw new Error('Location permission is required to show your cab.');
+        throw new Error('Location permission is required to show your cab. Please bring the app to the foreground and try again.');
       }
 
       const current = await Location.getCurrentPositionAsync({
