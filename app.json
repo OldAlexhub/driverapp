@@ -1,0 +1,68 @@
+{
+  "expo": {
+    "name": "TaxiOps by Old Alex Hub",
+    "slug": "taxiops",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/mipmap-xxxhdpi/ic_launcher.png",
+    "scheme": "driverapp",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "TaxiOps uses your location to update dispatch and show your cab on the live map.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "TaxiOps runs limited background location updates during active trips so dispatch can monitor progress."
+      }
+    },
+    "android": {
+      "package": "com.oldalex.taxiops.driver",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#001f3f",
+        "foregroundImage": "./assets/mipmap-xxxhdpi/ic_launcher.png",
+        "backgroundImage": "./assets/mipmap-xxxhdpi/ic_launcher.png",
+        "monochromeImage": "./assets/mipmap-xxxhdpi/ic_launcher.png"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "WAKE_LOCK"
+      ]
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/mipmap-xxxhdpi/ic_launcher.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/playstore.png",
+          "imageWidth": 512,
+          "resizeMode": "contain",
+          "backgroundColor": "#001f3f",
+          "dark": {
+            "backgroundColor": "#00111a"
+          }
+        }
+      ],
+      "expo-notifications"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "9c885a9d-fc9f-41dc-9964-914f0efd84d2"
+      }
+    },
+    "owner": "oldalex"
+  }
+}

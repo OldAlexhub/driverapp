@@ -1,0 +1,51 @@
+# Ignore common system cache/temp folders that may be picked up on Windows
+AppData/
+AppData/**
+**/AppData/**
+# Temp directories
+tmp/
+temp/
+**/Temp/**
+**/temp/**
+**/tmp/**
+# Chrome/Edge caches
+**/AppData/Local/Google/**
+**/AppData/Local/Microsoft/**
+# OS files
+Thumbs.db
+.DS_Store
+# Node and editor artifacts
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.env
+.vscode/
+.idea/
+# EAS build cache
+.easbuild/
+# Misc
+*.log
+*.tmp
+*.tmp*
+# keep git folder out
+.git/
+# Dependencies and VCS
+node_modules
+.git
+.expo
+.expo-shared
+
+# Build outputs
+dist
+build
+android/
+ios/
+
+# OS junk
+**/.DS_Store
+**/Thumbs.db
+
+# IDE junk
+.vscode
+.idea
