@@ -4,7 +4,7 @@
     "slug": "taxiops",
     "version": "1.0.0",
     "orientation": "portrait",
-  "icon": "./assets/images/icon.png",
+  "icon": "./assets/mipmap-xxxhdpi/ic_launcher.png",
     "scheme": "driverapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -20,8 +20,8 @@
       "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#001f3f",
-        "foregroundImage": "./assets/images/icon-foreground.png",
-        "backgroundImage": "./assets/images/icon-background.png"
+        "foregroundImage": "./assets/mipmap-xxxhdpi/ic_launcher_foreground.png",
+        "backgroundImage": "./assets/mipmap-xxxhdpi/ic_launcher.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -39,8 +39,7 @@
     "splash": {
       "image": "./assets/images/playstore.png",
       "resizeMode": "contain",
-      "backgroundColor": "#001f3f",
-      "imageWidth": 512
+      "backgroundColor": "#001f3f"
     },
     "plugins": [
       "expo-router",
