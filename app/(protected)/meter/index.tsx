@@ -300,6 +300,67 @@ export default function MeterScreen() {
   const isMeterRunning = isRunningStatus(meterStatus);
   const isMeterCompleted = meterStatus === 'completed';
 
+  // Keep the screen awake while the meter is running
+  useEffect(() => {
+    let active = false;
+    let keepModule: any = null;
+    let deactivated = false;
+    const activate = async () => {
+      try {
+        // dynamic import to avoid top-level native module issues
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        keepModule = require('expo-keep-awake');
+        if (keepModule && keepModule.default) keepModule = keepModule.default;
+        if (!keepModule) return;
+        if (typeof keepModule.activateKeepAwakeAsync === 'function') {
+          await keepModule.activateKeepAwakeAsync();
+          active = true;
+        } else if (typeof keepModule.activateKeepAwake === 'function') {
+          keepModule.activateKeepAwake();
+          active = true;
+        } else if (typeof keepModule.activate === 'function') {
+          keepModule.activate();
+          active = true;
+        }
+      } catch (e) {
+        // best-effort only
+        if (typeof __DEV__ !== 'undefined' && __DEV__) console.debug('[meter] keep-awake activation failed', e);
+      }
+    };
+
+    const deactivate = async () => {
+      if (!active || deactivated || !keepModule) return;
+      try {
+        if (typeof keepModule.deactivateKeepAwakeAsync === 'function') {
+          await keepModule.deactivateKeepAwakeAsync();
+        } else if (typeof keepModule.deactivateKeepAwake === 'function') {
+          keepModule.deactivateKeepAwake();
+        } else if (typeof keepModule.deactivate === 'function') {
+          keepModule.deactivate();
+        }
+      } catch (e) {
+        if (typeof __DEV__ !== 'undefined' && __DEV__) console.debug('[meter] keep-awake deactivation failed', e);
+      } finally {
+        deactivated = true;
+        active = false;
+        keepModule = null;
+      }
+    };
+
+    if (isMeterRunning) {
+      activate();
+    } else {
+      // if meter stopped, ensure deactivation
+      deactivate();
+    }
+
+    // cleanup on unmount
+    return () => {
+      // try to deactivate if we activated earlier
+      void deactivate();
+    };
+  }, [isMeterRunning]);
+
   const startDisabled =
     submitting ||
     !fareConfig ||

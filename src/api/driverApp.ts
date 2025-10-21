@@ -373,3 +373,21 @@ export async function registerDriverPushToken(
     body: payload,
   });
 }
+
+export interface AppendHosPayload {
+  date: string; // YYYY-MM-DD
+  minutes: number;
+}
+
+export async function appendHos(token: string, payload: AppendHosPayload): Promise<{ message: string }> {
+  return request('/driver-app/hos', { method: 'POST', token, body: payload });
+}
+
+export async function getHosSummary(token: string, driverId?: string, days = 8): Promise<any> {
+  const path = driverId ? `/driver-app/hos/${driverId}?days=${days}` : `/driver-app/hos?days=${days}`;
+  return request<any>(path, { token });
+}
+
+export async function uploadDiagnostics(token: string, payload: unknown): Promise<{ message: string }> {
+  return request<{ message: string }>('/driver-app/diagnostics', { method: 'POST', token, body: payload });
+}

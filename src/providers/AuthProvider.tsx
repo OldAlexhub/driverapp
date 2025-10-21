@@ -1,13 +1,18 @@
-import { PropsWithChildren, createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import * as SecureStore from 'expo-secure-store';
 import { useQueryClient } from '@tanstack/react-query';
+// Note: do NOT import expo-notifications at module top-level. Some versions
+// include an auto-registration FX which can run before native modules are
+// available and cause EventEmitter / metro symbolication errors. We'll
+// lazy-import notifications inside signIn where it's used.
+import Constants from 'expo-constants';
+import * as SecureStore from 'expo-secure-store';
+import { PropsWithChildren, createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import {
-  ApiError,
-  DriverAppLoginRequest,
-  DriverLoginResponse,
-  DriverSummary,
-  driverLogin,
-  driverLogout,
+    ApiError,
+    DriverAppLoginRequest,
+    DriverLoginResponse,
+    DriverSummary,
+    driverLogin,
+    driverLogout,
 } from '../api/driverApp';
 
 type AuthContextValue = {
@@ -66,6 +71,47 @@ export function AuthProvider({ children }: PropsWithChildren) {
         setToken(result.token);
         setDriverState(result.driver);
         queryClient.setQueryData(['driverProfile'], undefined);
+        // Try to register a push token for this device if notifications are enabled.
+        // Avoid importing `expo-notifications` when running inside Expo Go since
+        // recent Expo Go builds no longer include remote push support and the
+        // module may log or throw during its top-level execution. See:
+        // https://docs.expo.dev/develop/development-builds/introduction/
+        (async () => {
+          try {
+            if (Constants.appOwnership === 'expo') {
+              // Running in Expo Go — skip push registration to avoid noisy errors.
+              // Developers who need push tokens should use a development build /
+              // custom dev client.
+              // eslint-disable-next-line no-console
+              console.info('Skipping push registration: running in Expo Go. Use a dev-client for push support.');
+              return;
+            }
+            // dynamic import so the module's top-level code doesn't run on module
+            // initialization in unsupported environments.
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const Notifications: typeof import('expo-notifications') = await import('expo-notifications');
+            const permission = await Notifications.getPermissionsAsync();
+            let granted = permission.granted;
+            if (!granted) {
+              const request = await Notifications.requestPermissionsAsync();
+              granted = request.granted;
+            }
+            if (granted) {
+              const tokenData = await Notifications.getExpoPushTokenAsync();
+              const pushToken = (tokenData as any).data;
+              if (pushToken && result.token) {
+                const { registerDriverPushToken } = await import('../api/driverApp');
+                try {
+                  await registerDriverPushToken(result.token, { pushToken, deviceId: null });
+                } catch (e) {
+                  console.warn('Failed to register push token with server', e);
+                }
+              }
+            }
+          } catch (e) {
+            console.warn('Push registration failed', e);
+          }
+        })();
         return result;
       } catch (error) {
         if (error instanceof ApiError) {
@@ -78,6 +124,18 @@ export function AuthProvider({ children }: PropsWithChildren) {
     },
     [queryClient],
   );
+
+    // After token is set, try to flush any buffered diagnostics
+    useEffect(() => {
+      if (!token) return;
+      (async () => {
+        try {
+          // dynamic import to avoid cycles
+          const { flushDiagnostics } = await import('../utils/diagnostics');
+          await flushDiagnostics(token);
+        } catch (_e) {}
+      })();
+    }, [token]);
 
   const signOut = useCallback(async () => {
     const currentToken = token;

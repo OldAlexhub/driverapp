@@ -4,7 +4,9 @@ import { PropsWithChildren } from 'react';
 import { AppState, Platform } from 'react-native';
 import { useColorScheme } from '../../hooks/use-color-scheme';
 import AdminMessageModal from '../components/AdminMessageModal';
+import ErrorBoundary from '../components/ErrorBoundary';
 import useAdminMessages from '../hooks/useAdminMessages';
+import { setupGlobalHandlers } from '../utils/globalErrorReporter';
 import { AuthProvider } from './AuthProvider';
 import { RealtimeProvider } from './RealtimeProvider';
 
@@ -32,9 +34,27 @@ if (Platform.OS !== 'web') {
 }
 
 export function AppProviders({ children }: PropsWithChildren) {
+  // Setup global error handlers once per app init. We pass a token getter so
+  // error reports can be uploaded when available.
+  try {
+    setupGlobalHandlers(() => {
+      try {
+        // lazy require to avoid cycles at module load
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { useAuthContext } = require('./AuthProvider');
+        const ctx = useAuthContext();
+        return ctx?.token ?? null;
+      } catch (_e) {
+        return null;
+      }
+    });
+  } catch (_e) {}
+
   return (
     <QueryClientProvider client={queryClient}>
-      <ThemeBridge>{children}</ThemeBridge>
+      <ErrorBoundary>
+        <ThemeBridge>{children}</ThemeBridge>
+      </ErrorBoundary>
     </QueryClientProvider>
   );
 }

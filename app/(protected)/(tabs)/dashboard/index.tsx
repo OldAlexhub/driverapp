@@ -1,19 +1,23 @@
+import { appendHos, BookingStatus, BookingSummary } from '@/src/api/driverApp';
+import { useAuth } from '@/src/hooks/useAuth';
+import { useAcknowledgeBooking, useDeclineBooking, useReportLocationMutation } from '@/src/hooks/useDriverActions';
+import { useDriverBookings } from '@/src/hooks/useDriverBookings';
+import { useDriverLocation } from '@/src/hooks/useDriverLocation';
+import { useDriverProfile } from '@/src/hooks/useDriverProfile';
+import { useUpdatePresence } from '@/src/hooks/useUpdatePresence';
+import { useRealtime } from '@/src/providers/RealtimeProvider';
+import { getHos, setHos } from '@/src/services/hos';
+import { formatCurrency } from '@/src/utils/format';
+import dayjs from 'dayjs';
+import relativeTime from 'dayjs/plugin/relativeTime';
+import utc from 'dayjs/plugin/utc';
+import * as Haptics from 'expo-haptics';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useRouter } from 'expo-router';
-import dayjs from 'dayjs';
-import relativeTime from 'dayjs/plugin/relativeTime';
-import { BookingStatus, BookingSummary } from '@/src/api/driverApp';
-import { useDriverProfile } from '@/src/hooks/useDriverProfile';
-import { useUpdatePresence } from '@/src/hooks/useUpdatePresence';
-import { useAuth } from '@/src/hooks/useAuth';
-import { useRealtime } from '@/src/providers/RealtimeProvider';
-import { useDriverBookings } from '@/src/hooks/useDriverBookings';
-import { useDriverLocation } from '@/src/hooks/useDriverLocation';
-import { useAcknowledgeBooking, useDeclineBooking, useReportLocationMutation } from '@/src/hooks/useDriverActions';
-import { formatCurrency } from '@/src/utils/format';
 dayjs.extend(relativeTime);
+dayjs.extend(utc);
 
 interface IncomingAssignment {
   id: string;
@@ -24,10 +28,12 @@ interface IncomingAssignment {
 const WATCHED_STATUSES: BookingStatus[] = ['Assigned', 'EnRoute', 'PickedUp'];
 
 export default function DashboardScreen() {
+  console.log('Dashboard loaded');
   const router = useRouter();
   const { data, isLoading, isFetching, refetch, error } = useDriverProfile();
   const { mutateAsync: updatePresence, isPending } = useUpdatePresence();
   const { signOut } = useAuth();
+  const { token } = useAuth();
   const { socket } = useRealtime();
   const acknowledgeAssignment = useAcknowledgeBooking();
   const declineAssignment = useDeclineBooking();
@@ -47,6 +53,7 @@ export default function DashboardScreen() {
   const active = data?.active;
   const hours = active?.hoursOfService;
   const dutyStart = hours?.dutyStart ? dayjs(hours.dutyStart) : null;
+  const [localDutyStart, setLocalDutyStart] = useState<string | null>(null);
 
   const onDutyMinutesToday = useMemo(() => {
     if (!hours?.dutyStart) return hours?.onDutyMinutesToday || 0;
@@ -95,6 +102,59 @@ export default function DashboardScreen() {
     setAssignmentError(null);
   }, [assignmentPrompt?.id]);
 
+  // Load persisted HOS on mount and prefer local dutyStart if available
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const hos = await getHos();
+        if (!cancelled && hos?.dutyStart) {
+          setLocalDutyStart(hos.dutyStart as string);
+        }
+      } catch (e) {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // While on duty, persist local dutyStart and send HOS deltas periodically (append-only)
+  useEffect(() => {
+    let interval: any = null;
+    const activeDutyStart = localDutyStart ?? (hours?.dutyStart ?? null);
+    if (activeDutyStart) {
+      // persist local
+      (async () => {
+        try {
+          await setHos({ dutyStart: activeDutyStart });
+        } catch (_e) {}
+      })();
+
+      // Send HOS delta every 5 minutes (append 5 minutes on the server)
+      interval = setInterval(async () => {
+        try {
+          if (!token) return;
+          await appendHos(token, { date: dayjs().utc().format('YYYY-MM-DD'), minutes: 5 });
+          try {
+            await setHos({ dutyStart: activeDutyStart, lastReportedAt: new Date().toISOString() });
+          } catch (_e) {}
+          // also update presence minimal info for location/availability
+          const loc = driverLocation.location;
+          if (loc?.coords) {
+            updatePresence({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+          }
+        } catch (_e) {
+          // ignore transient errors
+        }
+      }, 5 * 60 * 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [localDutyStart, hours?.dutyStart, updatePresence, token, driverLocation.location]);
+
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
@@ -117,38 +177,91 @@ export default function DashboardScreen() {
   useEffect(() => {
     if (!socket) return;
     const handleAssignment = (payload: any = {}) => {
-      const assignmentId = String(payload.id || payload._id || payload.bookingId || '');
-      if (!assignmentId) return;
-      setAssignmentPrompt({
-        id: assignmentId,
-        booking: payload,
-        expiresAt: Date.now() + 45_000,
-      });
-      setAssignmentError(null);
+      try {
+        const assignmentId = String(payload.id || payload._id || payload.bookingId || '');
+        if (!assignmentId) return;
+        setAssignmentPrompt({
+          id: assignmentId,
+          booking: payload,
+          expiresAt: Date.now() + 45_000,
+        });
+        setAssignmentError(null);
+        // Play a short alert sound (expo-av) with fallback to haptics.
+        (async () => {
+          let soundInstance: any = null;
+          try {
+            // dynamic import to avoid native module issues in dev
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const { Audio } = require('expo-av');
+            soundInstance = new Audio.Sound();
+            // path relative to project root / assets
+            // eslint-disable-next-line global-require, @typescript-eslint/no-var-requires
+            const asset = require('../../../../assets/sounds/Sound_Effect.mp3');
+            await soundInstance.loadAsync(asset, { shouldPlay: true, volume: 1.0 });
+            // some devices require an explicit playAsync call
+            if (typeof soundInstance.replayAsync === 'function') {
+              await soundInstance.replayAsync();
+            } else if (typeof soundInstance.playAsync === 'function') {
+              await soundInstance.playAsync();
+            }
+            // unload after a short delay
+            setTimeout(() => {
+              try {
+                soundInstance.unloadAsync().catch(() => {});
+              } catch (_e) {}
+            }, 3500);
+            return;
+          } catch (e) {
+            // fallback to haptics if audio can't be played
+            try {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            } catch (_) {
+              // ignore
+            }
+          } finally {
+            // best-effort unload if something partially loaded
+            if (soundInstance) {
+              try {
+                soundInstance.unloadAsync().catch(() => {});
+              } catch (_e) {}
+            }
+          }
+        })();
+      } catch (e) {
+        console.warn('Error in handleAssignment', e);
+      }
     };
 
     const handleAssignmentCancelled = (payload: any = {}) => {
-      const cancelledId = String(payload.id || payload._id || payload.bookingId || '');
-      let cleared = false;
-      setAssignmentPrompt((current) => {
-        if (!current) return current;
-        if (!cancelledId || current.id === cancelledId) {
-          cleared = true;
-          return null;
+      try {
+        const cancelledId = String(payload.id || payload._id || payload.bookingId || '');
+        let cleared = false;
+        setAssignmentPrompt((current) => {
+          if (!current) return current;
+          if (!cancelledId || current.id === cancelledId) {
+            cleared = true;
+            return null;
+          }
+          return current;
+        });
+        if (cleared) {
+          setAssignmentCountdown(0);
+          setAssignmentError(null);
+          setFeedback('Dispatch reassigned your trip.');
         }
-        return current;
-      });
-      if (cleared) {
-        setAssignmentCountdown(0);
-        setAssignmentError(null);
-        setFeedback('Dispatch reassigned your trip.');
+      } catch (e) {
+        console.warn('Error in handleAssignmentCancelled', e);
       }
     };
 
     const handleDispatchMessage = (payload: any = {}) => {
-      const title = payload?.title || 'Dispatch message';
-      const body = payload?.body ? ` ${payload.body}` : '';
-      setFeedback(`[Dispatch] ${title}.${body}`);
+      try {
+        const title = payload?.title || 'Dispatch message';
+        const body = payload?.body ? ` ${payload.body}` : '';
+        setFeedback(`[Dispatch] ${title}.${body}`);
+      } catch (e) {
+        console.warn('Error in handleDispatchMessage', e);
+      }
     };
 
     socket.on('assignment:new', handleAssignment);
@@ -202,6 +315,25 @@ export default function DashboardScreen() {
     reportLocation,
   ]);
 
+  // Periodically update presence with current location for dispatch while online and not on a trip
+  useEffect(() => {
+    let interval: any = null;
+    if (active?.availability === 'Online' && !activeBooking?._id) {
+      interval = setInterval(async () => {
+        try {
+          const loc = driverLocation.location;
+          if (!loc?.coords) return;
+          await updatePresence({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+        } catch (_e) {
+          // ignore transient errors
+        }
+      }, 15 * 1000); // every 15 seconds
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [active?.availability, activeBooking?._id, driverLocation.location, updatePresence]);
+
   const isResponding = acknowledgeAssignment.isPending || declineAssignment.isPending;
 
   const handleAcceptAssignment = useCallback(async () => {
@@ -251,12 +383,17 @@ export default function DashboardScreen() {
     setFeedback(null);
     setMutationError(null);
     try {
+      const startIso = new Date().toISOString();
       await updatePresence({
         availability: 'Online',
         status: 'Active',
-        hoursOfService: { dutyStart: new Date().toISOString() },
+        hoursOfService: { dutyStart: startIso },
         note: 'driver-app-start-shift',
       });
+      setLocalDutyStart(startIso);
+      try {
+        await setHos({ dutyStart: startIso, lastReportedAt: new Date().toISOString() });
+      } catch (_e) {}
       setFeedback('Shift started. Stay safe out there.');
     } catch (err) {
       setMutationError(err instanceof Error ? err.message : 'Unable to start shift.');
@@ -272,18 +409,38 @@ export default function DashboardScreen() {
     setFeedback(null);
     setMutationError(null);
     try {
-      const minutes = Math.max(dayjs().diff(dutyStart, 'minute'), 0);
+      // compute remaining minutes from lastReportedAt and append to server
+      const hosLocal = await getHos();
+      const lastReportedAt = hosLocal?.lastReportedAt ? dayjs(hosLocal.lastReportedAt) : null;
+      const endAt = dayjs();
+      let remainingMinutes = Math.max(endAt.diff(dutyStart ? dayjs(dutyStart) : endAt, 'minute'), 0);
+      if (lastReportedAt && lastReportedAt.isValid()) {
+        const reportedSince = Math.max(endAt.diff(lastReportedAt, 'minute'), 0);
+        remainingMinutes = reportedSince;
+      }
+
+      if (remainingMinutes > 0 && token) {
+        try {
+          await appendHos(token, { date: dayjs().utc().format('YYYY-MM-DD'), minutes: remainingMinutes });
+        } catch (e) {
+          // ignore; we still clear local state
+        }
+      }
+
+      // update presence and clear local dutyStart
       await updatePresence({
         availability: 'Offline',
         status: 'Inactive',
         hoursOfService: {
           dutyStart: null,
-          onDutyMinutesToday: minutes,
+          onDutyMinutesToday: Math.max(dayjs().diff(dutyStart, 'minute'), 0),
           lastBreakEnd: new Date().toISOString(),
         },
         note: 'driver-app-end-shift',
       });
-      setFeedback(`Shift ended. Logged ${minutes} minutes on duty.`);
+      setLocalDutyStart(null);
+      await setHos({ dutyStart: null, onDutyMinutesToday: remainingMinutes, lastReportedAt: null });
+      setFeedback(`Shift ended. Logged ${remainingMinutes} minutes on duty.`);
     } catch (err) {
       setMutationError(err instanceof Error ? err.message : 'Unable to end shift.');
     }
@@ -295,6 +452,8 @@ export default function DashboardScreen() {
     setMutationError(null);
     try {
       await updatePresence({ availability: 'Offline', note: 'driver-app-go-offline' });
+      setLocalDutyStart(null);
+      await setHos({ dutyStart: null });
       setFeedback('You are offline.');
     } catch (err) {
       setMutationError(err instanceof Error ? err.message : 'Unable to update status.');

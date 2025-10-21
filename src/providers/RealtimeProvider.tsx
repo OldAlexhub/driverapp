@@ -1,4 +1,5 @@
-import { PropsWithChildren, createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { flushDiagnostics, logDiagnostic } from '@/src/utils/diagnostics';
+import { createContext, PropsWithChildren, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { API_BASE_URL } from '../api/driverApp';
 import { useAuth } from '../hooks/useAuth';
@@ -52,10 +53,27 @@ export function RealtimeProvider({ children }: PropsWithChildren) {
     });
     socketRef.current = client;
 
-    const handleConnect = () => setConnected(true);
-    const handleDisconnect = () => setConnected(false);
-    const handleError = (error: Error) => {
+    const handleConnect = () => {
+      setConnected(true);
+      try {
+        logDiagnostic({ level: 'info', tag: 'realtime.connect', message: 'socket connected', payload: { url } });
+        // attempt to flush any buffered diagnostics now that we're authenticated and online
+        try {
+          flushDiagnostics(token).catch(() => {});
+        } catch (_e) {}
+      } catch (_e) {}
+    };
+    const handleDisconnect = (reason?: any) => {
+      setConnected(false);
+      try {
+        logDiagnostic({ level: 'warn', tag: 'realtime.disconnect', message: 'socket disconnected', payload: { reason, url } });
+      } catch (_e) {}
+    };
+    const handleError = (error: any) => {
       console.warn('Realtime connection error', error);
+      try {
+        logDiagnostic({ level: 'error', tag: 'realtime.error', message: String(error?.message ?? error), payload: { error, url } });
+      } catch (_e) {}
     };
 
     client.on('connect', handleConnect);

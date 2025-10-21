@@ -1,6 +1,8 @@
+import { logDiagnostic } from '@/src/utils/diagnostics';
 import { distanceBetween, metersToMiles, mphToMetersPerSecond, secondsToMinutes } from '@/src/utils/geo';
 import * as Location from 'expo-location';
-import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
+import * as SecureStore from 'expo-secure-store';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 
 export type MeterStatus = 'idle' | 'running' | 'paused' | 'completed';
@@ -41,6 +43,7 @@ type MeterAction =
   | { type: 'RESUME'; payload: { timestamp: number } }
   | { type: 'STOP'; payload: { timestamp: number } }
   | { type: 'RESET' }
+  | { type: 'HYDRATE'; payload: MeterState }
   | { type: 'SET_ERROR'; payload: string | null };
 
 const initialState: MeterState = {
@@ -59,6 +62,17 @@ const initialState: MeterState = {
 
 function meterReducer(state: MeterState, action: MeterAction): MeterState {
   switch (action.type) {
+    case 'HYDRATE': {
+      // Replace full state with hydrated snapshot from storage. Keep safety guards.
+      const payload = action.payload;
+      // Cap points
+      const MAX_POINTS = 500;
+      const cappedPoints = Array.isArray(payload.points) && payload.points.length > MAX_POINTS ? payload.points.slice(payload.points.length - MAX_POINTS) : payload.points || [];
+      return {
+        ...payload,
+        points: cappedPoints,
+      };
+    }
     case 'START': {
       const { timestamp, location, config } = action.payload;
       const initialPoint =
@@ -235,12 +249,40 @@ export function useFlagdownMeter() {
   const [state, dispatch] = useReducer(meterReducer, initialState);
   const watcherRef = useRef<Location.LocationSubscription | null>(null);
   const isMounted = useRef(true);
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     return () => {
       isMounted.current = false;
       watcherRef.current?.remove();
       watcherRef.current = null;
+    };
+  }, []);
+
+  
+
+  // Hydrate persisted meter state once on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = await SecureStore.getItemAsync('taxiops:meterState');
+        if (!raw) {
+          setHydrated(true);
+          return;
+        }
+        const parsed = JSON.parse(raw) as MeterState | null;
+        if (parsed && !cancelled) {
+          dispatch({ type: 'HYDRATE', payload: parsed });
+        }
+      } catch (e) {
+        // ignore parse errors
+      } finally {
+        setHydrated(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
     };
   }, []);
 
@@ -285,6 +327,19 @@ export function useFlagdownMeter() {
           // Store a brief error message in state for diagnostics.
           const message = err instanceof Error ? err.message : String(err);
           dispatch({ type: 'SET_ERROR', payload: `Location watch error: ${message}` });
+          // record diagnostic with meter snapshot
+          try {
+            const snapshot = {
+              status: state.status,
+              startedAt: state.startedAt,
+              elapsedSeconds: state.elapsedSeconds,
+              distanceMeters: state.distanceMeters,
+              waitSeconds: state.waitSeconds,
+              pointsCount: Array.isArray(state.points) ? state.points.length : 0,
+              appState: AppState.currentState,
+            };
+            logDiagnostic({ level: 'error', tag: 'meter.locationWatcher', message: String(message), payload: { err: String(err), snapshot } });
+          } catch (_e) {}
         }
       },
     );
@@ -294,6 +349,56 @@ export function useFlagdownMeter() {
     watcherRef.current?.remove();
     watcherRef.current = null;
   }, []);
+
+  // Persist immediately when the app backgrounds, and try to restart watcher when returning to foreground
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      try {
+        if (next === 'background' || next === 'inactive') {
+          // ensure latest state is persisted (use same snapshot logic)
+          (async () => {
+            try {
+              const snapshot: MeterState = {
+                status: state.status,
+                startedAt: state.startedAt,
+                elapsedSeconds: state.elapsedSeconds,
+                distanceMeters: state.distanceMeters,
+                waitSeconds: state.waitSeconds,
+                lastLocation: state.lastLocation,
+                lastTimestamp: state.lastTimestamp,
+                idleAnchor: state.idleAnchor,
+                config: state.config,
+                points: state.points,
+                error: state.error,
+              };
+              await SecureStore.setItemAsync('taxiops:meterState', JSON.stringify(snapshot));
+              try {
+                logDiagnostic({ level: 'info', tag: 'meter.appstate', message: 'persisted on background', payload: { status: state.status } });
+              } catch (_e) {}
+            } catch (_e) {}
+          })();
+        }
+        if (next === 'active') {
+          // If meter is running but watch was stopped (e.g., OS killed it while backgrounded), restart it.
+          if (state.status === 'running' && !watcherRef.current) {
+            (async () => {
+              try {
+                await startWatcher();
+                try {
+                  logDiagnostic({ level: 'info', tag: 'meter.appstate', message: 'restarted watcher on foreground' });
+                } catch (_e) {}
+              } catch (e) {
+                try {
+                  logDiagnostic({ level: 'error', tag: 'meter.appstate', message: 'failed to restart watcher', payload: { error: String(e) } });
+                } catch (_e) {}
+              }
+            })();
+          }
+        }
+      } catch (_e) {}
+    });
+    return () => sub.remove();
+  }, [state.status, state.points, state.elapsedSeconds]);
 
   const start = useCallback(
     async ({ config }: StartParams) => {
@@ -320,10 +425,17 @@ export function useFlagdownMeter() {
             config,
           },
         });
+          try {
+            logDiagnostic({ level: 'info', tag: 'meter.start', message: 'Meter started', payload: { timestamp, hasInitialLocation: Boolean(initialLocation) } });
+          } catch (_e) {}
         await startWatcher();
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unable to start meter.';
         dispatch({ type: 'SET_ERROR', payload: message });
+        try {
+          const snapshot = { appState: AppState.currentState };
+          logDiagnostic({ level: 'error', tag: 'meter.start.error', message: message, payload: { error: String(error), snapshot } });
+        } catch (_e) {}
         throw error;
       }
     },
@@ -334,6 +446,9 @@ export function useFlagdownMeter() {
     if (state.status !== 'running') return;
     stopWatcher();
     dispatch({ type: 'PAUSE' });
+    try {
+      logDiagnostic({ level: 'info', tag: 'meter.pause', message: 'Meter paused', payload: { appState: AppState.currentState } });
+    } catch (_e) {}
   }, [state.status, stopWatcher]);
 
   const resume = useCallback(async () => {
@@ -346,12 +461,49 @@ export function useFlagdownMeter() {
     if (state.status === 'idle' || state.status === 'completed') return;
     stopWatcher();
     dispatch({ type: 'STOP', payload: { timestamp: Date.now() } });
+    try {
+      logDiagnostic({ level: 'info', tag: 'meter.stop', message: 'Meter stopped', payload: { appState: AppState.currentState } });
+    } catch (_e) {}
   }, [state.status, stopWatcher]);
 
   const reset = useCallback(() => {
     stopWatcher();
     dispatch({ type: 'RESET' });
+    try {
+      logDiagnostic({ level: 'info', tag: 'meter.reset', message: 'Meter reset' });
+    } catch (_e) {}
+    // Remove persisted snapshot when reset
+    (async () => {
+      try {
+        await SecureStore.deleteItemAsync('taxiops:meterState');
+      } catch (_e) {}
+    })();
   }, [stopWatcher]);
+
+  // Persist meter state changes (throttle by writing only key fields)
+  useEffect(() => {
+    if (!hydrated) return;
+    (async () => {
+      try {
+        const snapshot: MeterState = {
+          status: state.status,
+          startedAt: state.startedAt,
+          elapsedSeconds: state.elapsedSeconds,
+          distanceMeters: state.distanceMeters,
+          waitSeconds: state.waitSeconds,
+          lastLocation: state.lastLocation,
+          lastTimestamp: state.lastTimestamp,
+          idleAnchor: state.idleAnchor,
+          config: state.config,
+          points: state.points,
+          error: state.error,
+        };
+        await SecureStore.setItemAsync('taxiops:meterState', JSON.stringify(snapshot));
+      } catch (e) {
+        // best-effort only
+      }
+    })();
+  }, [state.status, state.startedAt, state.elapsedSeconds, state.distanceMeters, state.waitSeconds, state.lastTimestamp, state.idleAnchor, state.config, state.points, state.error, hydrated]);
 
   const totals = useMemo(() => {
     const distanceMiles = metersToMiles(state.distanceMeters);
