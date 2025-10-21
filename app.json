@@ -3,7 +3,7 @@
   "name": "TaxiOps",
     "slug": "taxiops",
     "version": "1.0.0",
-    "orientation": "portrait",
+  "orientation": "default",
   "icon": "./assets/mipmap-xxxhdpi/ic_launcher.png",
     "scheme": "driverapp",
     "userInterfaceStyle": "automatic",

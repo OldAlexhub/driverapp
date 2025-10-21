@@ -28,7 +28,7 @@ interface IncomingAssignment {
 const WATCHED_STATUSES: BookingStatus[] = ['Assigned', 'EnRoute', 'PickedUp'];
 
 export default function DashboardScreen() {
-  console.log('Dashboard loaded');
+  if (typeof __DEV__ !== 'undefined' && __DEV__) console.log('Dashboard loaded');
   const router = useRouter();
   const { data, isLoading, isFetching, refetch, error } = useDriverProfile();
   const { mutateAsync: updatePresence, isPending } = useUpdatePresence();

@@ -7,7 +7,7 @@ import { ActivityIndicator, Image, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function SplashVideo() {
-  console.log('Splash loaded');
+  if (typeof __DEV__ !== 'undefined' && __DEV__) console.log('Splash loaded');
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const startedAtRef = useRef<number | null>(null);
@@ -55,7 +55,7 @@ export default function SplashVideo() {
       return;
     }
     try {
-      console.log('Splash navigating after min duration, token present:', !!token);
+  if (typeof __DEV__ !== 'undefined' && __DEV__) console.log('Splash navigating after min duration, token present:', !!token);
       if (token) {
         router.replace('/(protected)');
       } else {

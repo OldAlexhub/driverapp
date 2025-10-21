@@ -1,8 +1,8 @@
 import { BookingStatus, BookingSummary, FlatRateOption } from '@/src/api/driverApp';
 import {
-  useFlagdownMutation,
-  useReportLocationMutation,
-  useUpdateBookingStatusMutation,
+    useFlagdownMutation,
+    useReportLocationMutation,
+    useUpdateBookingStatusMutation,
 } from '@/src/hooks/useDriverActions';
 import { useDriverBookings } from '@/src/hooks/useDriverBookings';
 import { useDriverFare } from '@/src/hooks/useDriverFare';
@@ -17,14 +17,14 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Animated,
-  Easing,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text, useWindowDimensions, View
+    ActivityIndicator,
+    Animated,
+    Easing,
+    Modal,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text, useWindowDimensions, View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -96,6 +96,8 @@ export default function MeterScreen() {
   const isLandscape = width > height;
   const [forceCompact, setForceCompact] = useState(false);
   const isCompactView = isLandscape || forceCompact;
+  // dynamically compute fare font size to avoid clipping in landscape or on small screens
+  const fareFontSize = isLandscape ? Math.max(28, Math.min(48, Math.floor(width * 0.12))) : 56;
   const [showDebug, setShowDebug] = useState(false);
 
   const [selectedFeeNames, setSelectedFeeNames] = useState<string[]>([]);
@@ -174,21 +176,40 @@ export default function MeterScreen() {
   }, [driverLocation.location]);
 
   useEffect(() => {
-    if (!booking?._id || !driverLocation.location?.coords) return;
+    // Only report booking location to the server when the driver is actively on a trip
+    // (dispatched: EnRoute or PickedUp) or when running in flagdown mode (driver-initiated trip).
+    // We still keep local live location updates for dispatch via updatePresence elsewhere.
+    const hasCoords = Boolean(driverLocation.location?.coords);
+    const isActiveTrip = isFlagdownMode || Boolean(
+      booking?._id && (booking.dispatchMethod === 'flagdown' || ['EnRoute', 'PickedUp'].includes(booking.status))
+    );
+    if (!isActiveTrip || !hasCoords) return;
+
     const now = Date.now();
     if (now - lastReportRef.current < 10000) return;
     lastReportRef.current = now;
+
+    // booking._id should exist when not in flagdown-mode; guard defensively and narrow coords
+    if (!booking?._id && isFlagdownMode) {
+      // In flagdown mode there is no booking yet; skip timeline writes. The flagdown flow will create the booking on submit.
+      return;
+    }
+    if (!booking?._id) return; // defensive guard: we need a booking id to POST location
+
+    const coords = driverLocation.location?.coords;
+    if (!coords) return;
+
     reportLocation.mutate({
       id: booking._id,
       payload: {
-        lat: driverLocation.location.coords.latitude,
-        lng: driverLocation.location.coords.longitude,
-        speed: driverLocation.location.coords.speed ?? undefined,
-        heading: driverLocation.location.coords.heading ?? undefined,
-        accuracy: driverLocation.location.coords.accuracy ?? undefined,
+        lat: coords.latitude,
+        lng: coords.longitude,
+        speed: coords.speed ?? undefined,
+        heading: coords.heading ?? undefined,
+        accuracy: coords.accuracy ?? undefined,
       },
     });
-  }, [booking?._id, driverLocation.location?.timestamp, driverLocation.location?.coords, reportLocation]);
+  }, [booking?._id, booking?.status, booking?.dispatchMethod, isFlagdownMode, driverLocation.location?.timestamp, driverLocation.location?.coords, reportLocation]);
 
   const availableOtherFees = useMemo(() => {
     const baseFees = fareConfig?.otherFees ?? [];
@@ -709,7 +730,7 @@ export default function MeterScreen() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.landscapeContainer}>
           <View style={styles.landscapeFareRow}>
-            <Animated.Text style={[styles.bigFare, { transform: [{ scale: animatedScale.current }] }]}>
+            <Animated.Text style={[styles.bigFare, { fontSize: fareFontSize, transform: [{ scale: animatedScale.current }] }]}>
               {Number.isFinite(displayedFare) ? formatCurrency(displayedFare) : '-'}
             </Animated.Text>
           </View>
@@ -825,6 +846,7 @@ export default function MeterScreen() {
             <Animated.Text
               style={[
                 styles.bigFare,
+                { fontSize: fareFontSize },
                 {
                   transform: [{ scale: animatedScale.current }],
                 },
