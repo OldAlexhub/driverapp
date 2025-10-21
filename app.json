@@ -7,7 +7,7 @@
   "icon": "./assets/mipmap-xxxhdpi/ic_launcher.png",
     "scheme": "driverapp",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+  "newArchEnabled": false,
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
