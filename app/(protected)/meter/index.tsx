@@ -772,6 +772,13 @@ export default function MeterScreen() {
               {actionError ? <Text style={{ color: '#f97316', fontSize: 12 }}>err: {actionError}</Text> : null}
             </View>
           ) : null}
+          {/* Compact extras summary so drivers can still see selected fees */}
+          <View style={{ width: '100%', marginTop: 8, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 8 }}>
+            <Pressable onPress={() => setShowExtras((s) => !s)}>
+              <Text style={{ color: '#22d3ee', fontWeight: '700' }}>{showExtras ? 'Hide extras' : 'Show extras'}</Text>
+            </Pressable>
+            <Text style={{ color: '#94a3b8' }}>{passengers} pax · {selectedFees.length} fees</Text>
+          </View>
         </View>
       </SafeAreaView>
     );
@@ -896,7 +903,8 @@ export default function MeterScreen() {
         </View>
 
         {/* Trip info: pickup/dropoff + selected extras so driver can head to customer */}
-        <View style={styles.tripInfoCard}>
+        {booking ? (
+          <View style={styles.tripInfoCard}>
           <Text style={styles.sectionTitle}>Trip details</Text>
           <View style={{ marginTop: 8 }}>
             <Text style={styles.label}>Pickup</Text>
@@ -930,7 +938,8 @@ export default function MeterScreen() {
               ))}
             </View>
           ) : null}
-        </View>
+          </View>
+        ) : null}
 
         <View style={styles.controlsStack}>
           <Pressable
@@ -1455,7 +1464,7 @@ const styles = StyleSheet.create({
   mutedSmall: { color: '#94a3b8', fontSize: 12, marginTop: 8 },
   // Stack controls vertically for easier one-handed operation
   controlsStack: { flexDirection: 'column', gap: 12, marginTop: 12, width: '100%' },
-  bigControlButton: { borderRadius: 14, paddingVertical: 14, alignItems: 'center', width: '100%' },
+  bigControlButton: { borderRadius: 14, paddingVertical: 14, alignItems: 'center', flex: 1 },
   bigControlText: { fontSize: 18, fontWeight: '700' },
   extrasBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 },
   extrasToggle: { color: '#22d3ee', fontWeight: '700' },
