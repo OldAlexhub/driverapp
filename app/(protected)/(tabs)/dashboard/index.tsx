@@ -48,6 +48,7 @@ export default function DashboardScreen() {
   const [assignmentPrompt, setAssignmentPrompt] = useState<IncomingAssignment | null>(null);
   const [assignmentCountdown, setAssignmentCountdown] = useState<number>(0);
   const [assignmentError, setAssignmentError] = useState<string | null>(null);
+  const assignmentSoundRef = useRef<any | null>(null);
   const locationReportRef = useRef<number>(0);
 
   const active = data?.active;
@@ -186,30 +187,39 @@ export default function DashboardScreen() {
           expiresAt: Date.now() + 45_000,
         });
         setAssignmentError(null);
-        // Play a short alert sound (expo-av) with fallback to haptics.
+        // Play a looping alert sound (expo-av) with fallback to haptics.
         (async () => {
-          let soundInstance: any = null;
           try {
             // dynamic import to avoid native module issues in dev
             // eslint-disable-next-line @typescript-eslint/no-var-requires
             const { Audio } = require('expo-av');
-            soundInstance = new Audio.Sound();
+            // stop previous sound if present
+            if (assignmentSoundRef.current) {
+              try {
+                await assignmentSoundRef.current.stopAsync();
+                await assignmentSoundRef.current.unloadAsync();
+              } catch (_e) {}
+              assignmentSoundRef.current = null;
+            }
+
+            const soundInstance = new Audio.Sound();
             // path relative to project root / assets
             // eslint-disable-next-line global-require, @typescript-eslint/no-var-requires
             const asset = require('../../../../assets/sounds/Sound_Effect.mp3');
             await soundInstance.loadAsync(asset, { shouldPlay: true, volume: 1.0 });
-            // some devices require an explicit playAsync call
+            // enable looping if supported
+            if (typeof soundInstance.setIsLoopingAsync === 'function') {
+              try {
+                await soundInstance.setIsLoopingAsync(true);
+              } catch (_e) {}
+            }
+            // some devices require explicit play
             if (typeof soundInstance.replayAsync === 'function') {
               await soundInstance.replayAsync();
             } else if (typeof soundInstance.playAsync === 'function') {
               await soundInstance.playAsync();
             }
-            // unload after a short delay
-            setTimeout(() => {
-              try {
-                soundInstance.unloadAsync().catch(() => {});
-              } catch (_e) {}
-            }, 3500);
+            assignmentSoundRef.current = soundInstance;
             return;
           } catch (e) {
             // fallback to haptics if audio can't be played
@@ -217,13 +227,6 @@ export default function DashboardScreen() {
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             } catch (_) {
               // ignore
-            }
-          } finally {
-            // best-effort unload if something partially loaded
-            if (soundInstance) {
-              try {
-                soundInstance.unloadAsync().catch(() => {});
-              } catch (_e) {}
             }
           }
         })();
@@ -248,6 +251,16 @@ export default function DashboardScreen() {
           setAssignmentCountdown(0);
           setAssignmentError(null);
           setFeedback('Dispatch reassigned your trip.');
+          // stop and unload any looping assignment sound
+          (async () => {
+            try {
+              if (assignmentSoundRef.current) {
+                await assignmentSoundRef.current.stopAsync();
+                await assignmentSoundRef.current.unloadAsync();
+              }
+            } catch (_e) {}
+            assignmentSoundRef.current = null;
+          })();
         }
       } catch (e) {
         console.warn('Error in handleAssignmentCancelled', e);
@@ -272,6 +285,16 @@ export default function DashboardScreen() {
       socket.off('assignment:new', handleAssignment);
       socket.off('assignment:cancelled', handleAssignmentCancelled);
       socket.off('message:new', handleDispatchMessage);
+      // cleanup sound on unmount
+      (async () => {
+        try {
+          if (assignmentSoundRef.current) {
+            await assignmentSoundRef.current.stopAsync();
+            await assignmentSoundRef.current.unloadAsync();
+          }
+        } catch (_e) {}
+        assignmentSoundRef.current = null;
+      })();
     };
   }, [socket]);
 

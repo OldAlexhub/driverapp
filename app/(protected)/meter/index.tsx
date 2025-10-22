@@ -24,7 +24,10 @@ import {
     Pressable,
     ScrollView,
     StyleSheet,
-    Text, useWindowDimensions, View
+    Text,
+    TextInput,
+    useWindowDimensions,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -892,6 +895,43 @@ export default function MeterScreen() {
           ) : null}
         </View>
 
+        {/* Trip info: pickup/dropoff + selected extras so driver can head to customer */}
+        <View style={styles.tripInfoCard}>
+          <Text style={styles.sectionTitle}>Trip details</Text>
+          <View style={{ marginTop: 8 }}>
+            <Text style={styles.label}>Pickup</Text>
+            <Text style={styles.addressText}>{booking?.pickupAddress ?? (isFlagdownMode ? 'Current location' : 'Pickup TBD')}</Text>
+          </View>
+          <View style={{ marginTop: 8 }}>
+            <Text style={styles.label}>Dropoff</Text>
+            {booking?.dropoffAddress ? (
+              <Text style={styles.addressText}>{booking.dropoffAddress}</Text>
+            ) : isFlagdownMode ? (
+              <TextInput
+                value={flagdownDropoff}
+                onChangeText={setFlagdownDropoff}
+                placeholder="Enter dropoff address (optional)"
+                placeholderTextColor="#64748b"
+                style={styles.inlineInput}
+              />
+            ) : (
+              <Text style={styles.addressText}>Dropoff TBD</Text>
+            )}
+          </View>
+
+          {selectedFees.length ? (
+            <View style={{ marginTop: 12 }}>
+              <Text style={styles.label}>Selected extras</Text>
+              {selectedFees.map((f) => (
+                <View key={f.name} style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>{f.name}</Text>
+                  <Text style={styles.detailValue}>{formatCurrency(f.amount)}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+        </View>
+
         <View style={styles.controlsStack}>
           <Pressable
             style={[styles.bigControlButton, styles.controlStart, startDisabled && styles.controlDisabled]}
@@ -1428,5 +1468,7 @@ const styles = StyleSheet.create({
   landscapeContainer: { width: '100%', padding: 12, alignItems: 'center', justifyContent: 'center' },
   landscapeFareRow: { width: '100%', alignItems: 'center', justifyContent: 'center', paddingVertical: 8 },
   landscapeControls: { flexDirection: 'row', gap: 12, width: '100%', justifyContent: 'space-around', marginTop: 8 },
+  tripInfoCard: { marginTop: 12, backgroundColor: '#061226', borderRadius: 14, padding: 12, borderWidth: 1, borderColor: '#123047', gap: 8 },
+  addressText: { color: '#f8fafc', marginTop: 4 },
 });
 
