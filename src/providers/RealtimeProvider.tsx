@@ -1,4 +1,5 @@
 import { flushDiagnostics, logDiagnostic } from '@/src/utils/diagnostics';
+import { flushOutbox } from '@/src/utils/offlineOutbox';
 import { createContext, PropsWithChildren, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { API_BASE_URL } from '../api/driverApp';
@@ -57,9 +58,12 @@ export function RealtimeProvider({ children }: PropsWithChildren) {
       setConnected(true);
       try {
         logDiagnostic({ level: 'info', tag: 'realtime.connect', message: 'socket connected', payload: { url } });
-        // attempt to flush any buffered diagnostics now that we're authenticated and online
+        // attempt to flush any buffered diagnostics and queued outbox entries now that we're authenticated and online
         try {
           flushDiagnostics(token).catch(() => {});
+        } catch (_e) {}
+        try {
+          flushOutbox(token).catch(() => {});
         } catch (_e) {}
       } catch (_e) {}
     };

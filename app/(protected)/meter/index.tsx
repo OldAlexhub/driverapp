@@ -1,13 +1,14 @@
 import { BookingStatus, BookingSummary, FlatRateOption } from '@/src/api/driverApp';
 import {
-    useFlagdownMutation,
-    useReportLocationMutation,
-    useUpdateBookingStatusMutation,
+  useFlagdownMutation,
+  useReportLocationMutation,
+  useUpdateBookingStatusMutation,
 } from '@/src/hooks/useDriverActions';
 import { useDriverBookings } from '@/src/hooks/useDriverBookings';
 import { useDriverFare } from '@/src/hooks/useDriverFare';
 import { useDriverLocation } from '@/src/hooks/useDriverLocation';
 import { useFlagdownMeter, type MeterStatus } from '@/src/hooks/useFlagdownMeter';
+import { useRealtime } from '@/src/providers/RealtimeProvider';
 import { formatCurrency, formatDistance, formatDuration } from '@/src/utils/format';
 import { buildMeterConfig, computeFareBreakdown, FareBreakdown } from '@/src/utils/meter';
 import { useQueryClient } from '@tanstack/react-query';
@@ -17,17 +18,17 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Animated,
-    Easing,
-    Modal,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    useWindowDimensions,
-    View,
+  ActivityIndicator,
+  Animated,
+  Easing,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -102,6 +103,9 @@ export default function MeterScreen() {
   // dynamically compute fare font size to avoid clipping in landscape or on small screens
   const fareFontSize = isLandscape ? Math.max(28, Math.min(48, Math.floor(width * 0.12))) : 56;
   const [showDebug, setShowDebug] = useState(false);
+  const { connected: realtimeConnected } = useRealtime();
+
+  const [outboxCount, setOutboxCount] = useState<number>(0);
 
   const [selectedFeeNames, setSelectedFeeNames] = useState<string[]>([]);
   const [passengers, setPassengers] = useState<number>(1);
@@ -178,6 +182,30 @@ export default function MeterScreen() {
     }
   }, [driverLocation.location]);
 
+  // Periodically refresh outbox count so drivers can see queued submissions.
+  useEffect(() => {
+    let mounted = true;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const refresh = async () => {
+      try {
+        const mod = await import('@/src/utils/offlineOutbox');
+        const items = await mod.listOutbox();
+        if (mounted) setOutboxCount(items.length);
+      } catch (e) {
+        // ignore
+      }
+    };
+    // refresh immediately and then poll
+    void refresh();
+    timer = setInterval(() => {
+      void refresh();
+    }, 5000);
+    return () => {
+      mounted = false;
+      if (timer) clearInterval(timer);
+    };
+  }, [realtimeConnected]);
+
   useEffect(() => {
     // Only report booking location to the server when the driver is actively on a trip
     // (dispatched: EnRoute or PickedUp) or when running in flagdown mode (driver-initiated trip).
@@ -252,10 +280,12 @@ export default function MeterScreen() {
     });
   }, [effectiveFlatRate?.amount, fareConfig, isFlatRateTrip, meter.totals.distanceMiles, meter.totals.waitMinutes, passengers, selectedFees]);
 
-  // For the live animated fare we only update when a whole mile or whole minute
+  // For the live animated fare we only update when a 0.75-mile milestone or whole minute
   // of waiting time has been reached. This reduces frequent micro-updates and
   // makes the count-up feel tied to meter milestones.
-  const displayDistanceMiles = Math.floor(meter.totals.distanceMiles ?? 0);
+  const METER_INCREMENT_MILES = 0.75; // display milestone step
+  const rawDistanceMiles = meter.totals.distanceMiles ?? 0;
+  const displayDistanceMiles = Math.floor(rawDistanceMiles / METER_INCREMENT_MILES) * METER_INCREMENT_MILES;
   const displayWaitMinutes = Math.floor(meter.totals.waitMinutes ?? 0);
 
   const displayComputedBreakdown = useMemo(() => {
@@ -276,11 +306,14 @@ export default function MeterScreen() {
   }, [fareConfig, isFlatRateTrip, computedBreakdown, displayDistanceMiles, displayWaitMinutes, passengers, selectedFees]);
 
   // Animate the fare when the live computed breakdown (or finalBreakdown) changes.
-  // Use the precise computedBreakdown so the big fare value increments smoothly as
-  // fractional distance and wait-time change while driving.
+  // For live updates prefer the milestone-based `displayComputedBreakdown` so the
+  // big fare value only changes on meaningful meter milestones (e.g. 0.75 mi or 1 min)
+  // rather than cent-by-cent as fractional distance accumulates.
   useEffect(() => {
-    const target = (finalBreakdown ? finalBreakdown.total : computedBreakdown ? computedBreakdown.total : 0) ?? 0;
-    const prev = previousFareRef.current ?? 0;
+    const liveBreakdown = isFlatRateTrip ? computedBreakdown : displayComputedBreakdown ?? computedBreakdown;
+    const rawTarget = finalBreakdown ? finalBreakdown.total : liveBreakdown ? liveBreakdown.total : 0;
+    const target = Number.isFinite(rawTarget) ? rawTarget : 0;
+    const prev = Number.isFinite(previousFareRef.current) ? previousFareRef.current : 0;
     // animate number value
     Animated.timing(animatedFare.current, {
       toValue: target,
@@ -304,15 +337,15 @@ export default function MeterScreen() {
       }
     }
     previousFareRef.current = target;
-  }, [computedBreakdown, finalBreakdown, animatedFare, animatedScale]);
+  }, [computedBreakdown, displayComputedBreakdown, finalBreakdown, animatedFare, animatedScale, isFlatRateTrip]);
 
   // Subscribe to animated value updates and set a numeric displayedFare for formatting
   useEffect(() => {
     const id = animatedFare.current.addListener(({ value }: { value: number }) => {
-      setDisplayedFare(Number(value));
+      setDisplayedFare(Number.isFinite(value) ? Number(value) : 0);
     });
     // initialize
-    setDisplayedFare(previousFareRef.current ?? 0);
+    setDisplayedFare(Number.isFinite(previousFareRef.current) ? previousFareRef.current : 0);
     return () => {
       if (animatedFare.current && id) {
         animatedFare.current.removeListener(id);
@@ -544,23 +577,51 @@ export default function MeterScreen() {
       }
 
       if (booking) {
-        await updateBookingStatus.mutateAsync({
-          id: booking._id,
+        try {
+          await updateBookingStatus.mutateAsync({
+            id: booking._id,
             payload: {
-            status: 'Completed',
-            // Always send numeric values (server requires meterMiles for meter trips).
-            meterMiles: Number(distanceMiles.toFixed(2)),
-            waitMinutes: Number(waitMinutes.toFixed(1)),
-            dropoffAddress: flagdownDropoff.trim() || booking.dropoffAddress || undefined,
-            dropoffLat: lastLocationRef.current?.coords?.latitude,
-            dropoffLon: lastLocationRef.current?.coords?.longitude,
-            note: isFlatRateTrip ? 'Driver completed flat-rate trip' : 'Meter trip completed',
-            flatRateId: effectiveFlatRate?._id,
-            otherFeeNames: otherFeeNames.length ? otherFeeNames : undefined,
-          },
-        });
-  // refresh driver bookings so other screens (dashboard/completed list) show updated fare
-  await queryClient.refetchQueries({ queryKey: ['driverBookings'], exact: false });
+              status: 'Completed',
+              // Always send numeric values (server requires meterMiles for meter trips).
+              meterMiles: Number(distanceMiles.toFixed(2)),
+              waitMinutes: Number(waitMinutes.toFixed(1)),
+              dropoffAddress: flagdownDropoff.trim() || booking.dropoffAddress || undefined,
+              dropoffLat: lastLocationRef.current?.coords?.latitude,
+              dropoffLon: lastLocationRef.current?.coords?.longitude,
+              note: isFlatRateTrip ? 'Driver completed flat-rate trip' : 'Meter trip completed',
+              flatRateId: effectiveFlatRate?._id,
+              otherFeeNames: otherFeeNames.length ? otherFeeNames : undefined,
+            },
+          });
+          // refresh driver bookings so other screens (dashboard/completed list) show updated fare
+          await queryClient.refetchQueries({ queryKey: ['driverBookings'], exact: false });
+        } catch (err) {
+          // If the network/mutation failed, enqueue for later retry
+          try {
+            const { enqueueOutbox } = await import('@/src/utils/offlineOutbox');
+            await enqueueOutbox({
+              id: `u-${Date.now()}`,
+              type: 'updateBookingStatus',
+              bookingId: booking._id,
+              payload: {
+                status: 'Completed',
+                meterMiles: Number(distanceMiles.toFixed(2)),
+                waitMinutes: Number(waitMinutes.toFixed(1)),
+                dropoffAddress: flagdownDropoff.trim() || booking.dropoffAddress || undefined,
+                dropoffLat: lastLocationRef.current?.coords?.latitude,
+                dropoffLon: lastLocationRef.current?.coords?.longitude,
+                note: isFlatRateTrip ? 'Driver completed flat-rate trip' : 'Meter trip completed',
+                flatRateId: effectiveFlatRate?._id,
+                otherFeeNames: otherFeeNames.length ? otherFeeNames : undefined,
+              },
+              createdAt: Date.now(),
+            });
+            setStatusMessage('Trip saved locally and will be submitted when back online.');
+          } catch (e) {
+            // fallback: surface original error
+            throw err;
+          }
+        }
       } else {
         const flagdownPayload = {
           dropoffAddress: flagdownDropoff.trim() || undefined,
@@ -572,24 +633,68 @@ export default function MeterScreen() {
           dropoffLat: dropoffLat ?? undefined,
           dropoffLon: dropoffLon ?? undefined,
         };
-        const flagdownResponse = await createFlagdown.mutateAsync(flagdownPayload);
+        try {
+          const flagdownResponse = await createFlagdown.mutateAsync(flagdownPayload);
 
-        if (flagdownResponse?.booking?._id) {
-          await updateBookingStatus.mutateAsync({
-            id: flagdownResponse.booking._id,
-            payload: {
-              status: 'Completed',
+          if (flagdownResponse?.booking?._id) {
+            try {
+              await updateBookingStatus.mutateAsync({
+                id: flagdownResponse.booking._id,
+                payload: {
+                  status: 'Completed',
+                  meterMiles: Number(distanceMiles.toFixed(2)),
+                  waitMinutes: Number(waitMinutes.toFixed(1)),
+                  dropoffAddress: flagdownDropoff.trim() || undefined,
+                  dropoffLat: lastLocationRef.current?.coords?.latitude,
+                  dropoffLon: lastLocationRef.current?.coords?.longitude,
+                  note: 'Flagdown meter completed via driver app',
+                  flatRateId: effectiveFlatRate?._id,
+                  otherFeeNames: otherFeeNames.length ? otherFeeNames : undefined,
+                },
+              });
+              await queryClient.refetchQueries({ queryKey: ['driverBookings'], exact: false });
+            } catch (err) {
+              // enqueue completion if update fails
+              const { enqueueOutbox } = await import('@/src/utils/offlineOutbox');
+              await enqueueOutbox({
+                id: `f-${Date.now()}`,
+                type: 'flagdownAndComplete',
+                flagdownPayload,
+                completionPayload: {
+                  note: 'Flagdown meter completed via driver app',
+                  meterMiles: Number(distanceMiles.toFixed(2)),
+                  waitMinutes: Number(waitMinutes.toFixed(1)),
+                  dropoffAddress: flagdownDropoff.trim() || undefined,
+                  dropoffLat: lastLocationRef.current?.coords?.latitude,
+                  dropoffLon: lastLocationRef.current?.coords?.longitude,
+                  otherFeeNames: otherFeeNames.length ? otherFeeNames : undefined,
+                  flatRateId: effectiveFlatRate?._id,
+                },
+                createdAt: Date.now(),
+              });
+              setStatusMessage('Trip saved locally and will be submitted when back online.');
+            }
+          }
+        } catch (err) {
+          // createFlagdown failed (likely offline) - enqueue the whole operation
+          const { enqueueOutbox } = await import('@/src/utils/offlineOutbox');
+          await enqueueOutbox({
+            id: `f-${Date.now()}`,
+            type: 'flagdownAndComplete',
+            flagdownPayload,
+            completionPayload: {
+              note: 'Flagdown meter completed via driver app',
               meterMiles: Number(distanceMiles.toFixed(2)),
               waitMinutes: Number(waitMinutes.toFixed(1)),
               dropoffAddress: flagdownDropoff.trim() || undefined,
               dropoffLat: lastLocationRef.current?.coords?.latitude,
               dropoffLon: lastLocationRef.current?.coords?.longitude,
-              note: 'Flagdown meter completed via driver app',
-              flatRateId: effectiveFlatRate?._id,
               otherFeeNames: otherFeeNames.length ? otherFeeNames : undefined,
+              flatRateId: effectiveFlatRate?._id,
             },
+            createdAt: Date.now(),
           });
-          await queryClient.refetchQueries({ queryKey: ['driverBookings'], exact: false });
+          setStatusMessage('Trip saved locally and will be submitted when back online.');
         }
       }
 
@@ -822,9 +927,16 @@ export default function MeterScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         {/* (Compact view handled earlier via early-return) */}
         <View style={styles.headerRow}>
-          <View>
-            <Text style={styles.title}>{isFlagdownMode ? 'Flagdown meter' : 'Trip meter'}</Text>
-            <Text style={styles.subtitle}>Start when passenger enters — end when they exit.</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View>
+              <Text style={styles.title}>{isFlagdownMode ? 'Flagdown meter' : 'Trip meter'}</Text>
+              <Text style={styles.subtitle}>Start when passenger enters — end when they exit.</Text>
+            </View>
+            {outboxCount > 0 ? (
+              <View style={styles.outboxBadge}>
+                <Text style={styles.outboxBadgeText}>{outboxCount}</Text>
+              </View>
+            ) : null}
           </View>
           <Text style={styles.smallStatus}>{isFlatRateTrip ? (tripStarted ? 'Flat rate' : 'Ready') : meter.status.toUpperCase()}</Text>
         </View>
@@ -871,13 +983,14 @@ export default function MeterScreen() {
             <Pressable onPress={() => setShowBreakdown((s) => !s)}>
               <Text style={styles.breakdownToggle}>{showBreakdown ? 'Hide fare breakdown' : 'Show fare breakdown'}</Text>
             </Pressable>
-            <Text style={styles.breakdownSummary}>{computedBreakdown ? formatCurrency(computedBreakdown.total) : '-'}</Text>
+            {/* Show the milestone-based value for live meter trips so the summary matches the big animated fare */}
+            <Text style={styles.breakdownSummary}>{(isFlatRateTrip ? computedBreakdown : (displayComputedBreakdown ?? computedBreakdown)) ? formatCurrency((isFlatRateTrip ? computedBreakdown : (displayComputedBreakdown ?? computedBreakdown))!.total) : '-'}</Text>
           </View>
 
           {showBreakdown ? (
             <View style={styles.breakdownCard}>
               {(() => {
-                const b = finalBreakdown ?? computedBreakdown;
+                const b = finalBreakdown ?? (isFlatRateTrip ? computedBreakdown : displayComputedBreakdown ?? computedBreakdown);
                 if (!b) return <Text style={styles.mutedSmall}>No breakdown available</Text>;
                 return (
                   <>
@@ -1473,6 +1586,8 @@ const styles = StyleSheet.create({
   breakdownToggle: { color: '#22d3ee', fontWeight: '700' },
   breakdownSummary: { color: '#94a3b8' },
   breakdownCard: { marginTop: 8, backgroundColor: '#071526', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#123047' },
+  outboxBadge: { backgroundColor: '#f97316', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, marginLeft: 8 },
+  outboxBadgeText: { color: '#0f172a', fontWeight: '700' },
   /* Landscape compact view */
   landscapeContainer: { width: '100%', padding: 12, alignItems: 'center', justifyContent: 'center' },
   landscapeFareRow: { width: '100%', alignItems: 'center', justifyContent: 'center', paddingVertical: 8 },
