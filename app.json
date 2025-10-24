@@ -32,6 +32,10 @@
         "WAKE_LOCK"
       ]
     },
+    "notification": {
+      "icon": "./assets/mipmap-xxxhdpi/ic_launcher_round.png",
+      "color": "#001f3f"
+    },
     "web": {
       "output": "static",
       "favicon": "./assets/mipmap-xxxhdpi/ic_launcher.png"
