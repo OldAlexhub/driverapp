@@ -32,8 +32,9 @@ export default function DashboardScreen() {
   const router = useRouter();
   const { data, isLoading, isFetching, refetch, error } = useDriverProfile();
   const { mutateAsync: updatePresence, isPending } = useUpdatePresence();
-  const { signOut } = useAuth();
-  const { token } = useAuth();
+  // Prefer driver data from the query, but fall back to the auth provider's
+  // cached driver so the UI remains stable while refetches complete.
+  const { signOut, token, driver: authDriver } = useAuth();
   const { socket } = useRealtime();
   const acknowledgeAssignment = useAcknowledgeBooking();
   const declineAssignment = useDeclineBooking();
@@ -499,7 +500,7 @@ export default function DashboardScreen() {
         <View style={styles.header}>
           <View>
             <Text style={styles.title}>
-              Hello {data?.driver?.firstName || 'Driver'}
+              Hello {data?.driver?.firstName ?? authDriver?.firstName ?? 'Driver'}
             </Text>
             <Text style={styles.subtitle}>
               {active?.availability === 'Online'

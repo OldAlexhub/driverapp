@@ -7,12 +7,12 @@ import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import { PropsWithChildren, createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import {
-    ApiError,
-    DriverAppLoginRequest,
-    DriverLoginResponse,
-    DriverSummary,
-    driverLogin,
-    driverLogout,
+  ApiError,
+  DriverAppLoginRequest,
+  DriverLoginResponse,
+  DriverSummary,
+  driverLogin,
+  driverLogout,
 } from '../api/driverApp';
 
 type AuthContextValue = {
@@ -70,7 +70,17 @@ export function AuthProvider({ children }: PropsWithChildren) {
         await SecureStore.setItemAsync(TOKEN_KEY, result.token);
         setToken(result.token);
         setDriverState(result.driver);
-        queryClient.setQueryData(['driverProfile'], undefined);
+        // Seed the driverProfile cache with the returned driver instead of
+        // clearing it. Clearing to `undefined` causes UI components that
+        // depend on the query to briefly render their empty/placeholder
+        // states (e.g. "Hello Driver" or missing fare config) while the
+        // background refetch completes. Provide the known driver so the
+        // UI remains stable and a refetch can still update the cache.
+        try {
+          queryClient.setQueryData(['driverProfile'], { driver: result.driver } as any);
+        } catch (_e) {
+          // ignore cache set errors
+        }
         // Try to register a push token for this device if notifications are enabled.
         // Avoid importing `expo-notifications` when running inside Expo Go since
         // recent Expo Go builds no longer include remote push support and the
