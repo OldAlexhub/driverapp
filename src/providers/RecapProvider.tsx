@@ -20,6 +20,16 @@ type RecapContextValue = {
 
 const RecapContext = createContext<RecapContextValue>({ showRecap: () => {} });
 
+// Expose a module-level callable so non-React code (mutations, utilities)
+// can request a recap without calling hooks outside components. This will be
+// wired to the live provider instance when mounted.
+let __globalShowRecap: ((p: RecapPayload) => void) | null = null;
+export function showRecapGlobal(p: RecapPayload) {
+  try {
+    if (__globalShowRecap) __globalShowRecap(p);
+  } catch (_e) {}
+}
+
 export function RecapProvider({ children }: PropsWithChildren) {
   const [visible, setVisible] = useState(false);
   const [payload, setPayload] = useState<RecapPayload | null>(null);
@@ -29,6 +39,15 @@ export function RecapProvider({ children }: PropsWithChildren) {
     setPayload(p);
     setVisible(true);
   }, []);
+
+  // Wire the module-global caller to the local showRecap so external code can
+  // call `showRecapGlobal(...)` without needing React hooks.
+  React.useEffect(() => {
+    __globalShowRecap = showRecap;
+    return () => {
+      if (__globalShowRecap === showRecap) __globalShowRecap = null;
+    };
+  }, [showRecap]);
 
   const handleDismiss = useCallback(() => {
     setVisible(false);

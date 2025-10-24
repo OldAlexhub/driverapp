@@ -161,6 +161,11 @@ export default function MeterScreen() {
   // the persisted meter state (meter.status). For dispatched flat-rate
   // bookings the server marks the booking 'PickedUp' when the driver started
   // the trip — use that to set the local tripStarted flag.
+  //
+  // IMPORTANT: wait for the meter hook to finish hydration before reading
+  // meter.status. Previously the screen could read an unhhydrated 'idle'
+  // state and fail to resume the UI. The hook now exposes `hydrated` so we
+  // defer until it's true.
   useEffect(() => {
     // For flat-rate dispatched trips, resume if server shows PickedUp
     if (isFlatRateTrip) {
@@ -169,13 +174,19 @@ export default function MeterScreen() {
       }
       return;
     }
+
+    // Wait for persistence hydration to complete to avoid a race where the
+    // hook's initial state is still 'idle' while the persisted snapshot is
+    // being loaded.
+    if (!meter.hydrated) return;
+
     // For meter trips (flagdown or dispatched), if the meter hook reports
     // running or paused (mid-trip), reflect that in the UI so the driver
     // doesn't need to press Start again.
     if (meter.status === 'running' || meter.status === 'paused') {
       setTripStarted(true);
     }
-  }, [isFlatRateTrip, booking?.status, meter.status]);
+  }, [isFlatRateTrip, booking?.status, meter.status, meter.hydrated]);
 
   useFocusEffect(
     useCallback(() => {

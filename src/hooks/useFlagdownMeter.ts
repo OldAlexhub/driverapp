@@ -257,6 +257,7 @@ function meterReducer(state: MeterState, action: MeterAction): MeterState {
 export function useFlagdownMeter() {
   const [state, dispatch] = useReducer(meterReducer, initialState);
   const watcherRef = useRef<Location.LocationSubscription | null>(null);
+  const latestStateRef = useRef<MeterState>(initialState);
   const isMounted = useRef(true);
   const persistTimerRef = useRef<number | null>(null);
   const [hydrated, setHydrated] = useState(false);
@@ -264,10 +265,42 @@ export function useFlagdownMeter() {
   useEffect(() => {
     return () => {
       isMounted.current = false;
+      // Persist a final snapshot on unmount so in-app navigation doesn't
+      // lose an in-progress meter when returning to the screen.
+      (async () => {
+        try {
+          const s = latestStateRef.current;
+          const snapshot: MeterState = {
+            status: s.status,
+            startedAt: s.startedAt,
+            elapsedSeconds: s.elapsedSeconds,
+            distanceMeters: s.distanceMeters,
+            waitSeconds: s.waitSeconds,
+            lastLocation: s.lastLocation,
+            lastTimestamp: s.lastTimestamp,
+            idleAnchor: s.idleAnchor,
+            config: s.config,
+            points: s.points,
+            error: s.error,
+          };
+          await SecureStore.setItemAsync('taxiops:meterState', JSON.stringify(snapshot));
+          try {
+            logDiagnostic({ level: 'info', tag: 'meter.unmount', message: 'persisted snapshot on unmount', payload: { status: s.status } });
+          } catch (_e) {}
+        } catch (_e) {
+          // best-effort only
+        }
+      })();
       watcherRef.current?.remove();
       watcherRef.current = null;
     };
   }, []);
+
+  // Keep a ref to the latest state for use in unmount/async callbacks so
+  // we always persist the freshest snapshot.
+  useEffect(() => {
+    latestStateRef.current = state;
+  }, [state]);
 
   
 
@@ -585,6 +618,7 @@ export function useFlagdownMeter() {
 
   return {
     ...state,
+    hydrated,
     start,
     pause,
     resume,

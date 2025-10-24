@@ -62,7 +62,6 @@ export function AppProviders({ children }: PropsWithChildren) {
 
 function ThemeBridge({ children }: PropsWithChildren) {
   const colorScheme = useColorScheme();
-  const { message, dismiss, acknowledge, snooze } = useAdminMessages();
 
   return (
     <AuthProvider>
@@ -70,10 +69,17 @@ function ThemeBridge({ children }: PropsWithChildren) {
         <RecapProvider>
           <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
             {children}
-            <AdminMessageModal message={message} onClose={dismiss} onAcknowledge={acknowledge} onSnooze={snooze} />
+            <AdminMessageBridge />
           </ThemeProvider>
         </RecapProvider>
       </RealtimeProvider>
     </AuthProvider>
   );
+}
+
+function AdminMessageBridge() {
+  // This hook depends on Auth/Realtime providers being available. Keep it
+  // in a child component so it runs after the providers are mounted.
+  const { message, dismiss, acknowledge, snooze } = useAdminMessages();
+  return <AdminMessageModal message={message} onClose={dismiss} onAcknowledge={acknowledge} onSnooze={snooze} />;
 }
