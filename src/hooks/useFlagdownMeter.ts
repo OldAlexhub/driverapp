@@ -296,6 +296,11 @@ export function useFlagdownMeter() {
     };
   }, []);
 
+  // After hydration, if the persisted state indicates the meter was running,
+  // ensure the location watcher is started so the totals continue updating.
+  // NOTE: effect moved below startWatcher declaration to avoid using the
+  // startWatcher variable before it's defined.
+
   const ensurePermission = useCallback(async () => {
     // First check current permission without prompting the user. This avoids
     // triggering the system permission dialog while the app is backgrounded
@@ -354,6 +359,26 @@ export function useFlagdownMeter() {
       },
     );
   }, []);
+
+  // After hydration, if the persisted state indicates the meter was running,
+  // ensure the location watcher is started so the totals continue updating.
+  useEffect(() => {
+    if (!hydrated) return;
+    (async () => {
+      try {
+        if (state.status === 'running' && !watcherRef.current) {
+          await startWatcher();
+          try {
+            logDiagnostic({ level: 'info', tag: 'meter.hydrate', message: 'restarted watcher after hydrate' });
+          } catch (_e) {}
+        }
+      } catch (e) {
+        try {
+          logDiagnostic({ level: 'error', tag: 'meter.hydrate', message: 'failed to restart watcher after hydrate', payload: { error: String(e) } });
+        } catch (_e) {}
+      }
+    })();
+  }, [hydrated, state.status, startWatcher]);
 
   const stopWatcher = useCallback(() => {
     watcherRef.current?.remove();

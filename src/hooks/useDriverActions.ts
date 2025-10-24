@@ -1,13 +1,13 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  acknowledgeBooking,
-  declineBooking,
-  updateBookingStatus,
-  createFlagdown,
-  reportBookingLocation,
-  UpdateBookingStatusPayload,
-  FlagdownPayload,
-  ReportLocationPayload,
+    acknowledgeBooking,
+    createFlagdown,
+    declineBooking,
+    FlagdownPayload,
+    reportBookingLocation,
+    ReportLocationPayload,
+    updateBookingStatus,
+    UpdateBookingStatusPayload,
 } from '../api/driverApp';
 import { useAuth } from './useAuth';
 
@@ -46,15 +46,48 @@ export function useDeclineBooking() {
 export function useUpdateBookingStatusMutation() {
   const { token } = useAuth();
   const queryClient = useQueryClient();
+  // Note: we avoid importing or calling recap hooks at module load time to
+  // prevent possible circular import issues. We'll attempt a lazy require of
+  // the RecapProvider at runtime inside onSuccess below.
 
   return useMutation({
     mutationFn: ({ id, payload }: { id: string; payload: UpdateBookingStatusPayload }) => {
       if (!token) throw new Error('Missing auth token');
       return updateBookingStatus(token, id, payload);
     },
-    onSuccess: () => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['driverProfile'] });
       queryClient.invalidateQueries({ queryKey: ['driverBookings'] });
+      try {
+        const payload = variables?.payload;
+        const booking = (data as any)?.booking;
+        if (payload?.status === 'Completed' && booking) {
+          // Build a minimal recap payload and show it via RecapProvider if available.
+          const recapPayload = {
+            tripLabel: booking.bookingId ? `Booking #${booking.bookingId}` : booking._id ? `Booking ${String(booking._id).slice(-6)}` : 'Trip',
+            distanceMiles: booking.meterMiles ?? booking.meterMiles ?? undefined,
+            waitMinutes: booking.waitMinutes ?? undefined,
+            elapsedSeconds: undefined,
+            passengers: booking.passengers ?? undefined,
+            otherFees: booking.appliedFees ?? undefined,
+            flatRateName: booking.flatRateName ?? undefined,
+            total: booking.finalFare ?? booking.estimatedFare ?? undefined,
+          };
+          try {
+            // Lazy require to avoid circular dependencies during module import.
+            // eslint-disable-next-line global-require, @typescript-eslint/no-var-requires
+            const mod = require('@/src/providers/RecapProvider');
+            const show = mod?.useRecap ? mod.useRecap().showRecap : mod?.showRecap ?? null;
+            if (typeof show === 'function') {
+              show(recapPayload);
+            }
+          } catch (_e) {
+            // ignore: recap is optional
+          }
+        }
+      } catch (_e) {
+        // no-op: recap is an optional enhancement
+      }
     },
   });
 }

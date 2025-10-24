@@ -9,6 +9,7 @@ import useAdminMessages from '../hooks/useAdminMessages';
 import { setupGlobalHandlers } from '../utils/globalErrorReporter';
 import { AuthProvider } from './AuthProvider';
 import { RealtimeProvider } from './RealtimeProvider';
+import RecapProvider from './RecapProvider';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -66,10 +67,12 @@ function ThemeBridge({ children }: PropsWithChildren) {
   return (
     <AuthProvider>
       <RealtimeProvider>
-        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-          {children}
-          <AdminMessageModal message={message} onClose={dismiss} />
-        </ThemeProvider>
+        <RecapProvider>
+          <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+            {children}
+            <AdminMessageModal message={message} onClose={dismiss} />
+          </ThemeProvider>
+        </RecapProvider>
       </RealtimeProvider>
     </AuthProvider>
   );

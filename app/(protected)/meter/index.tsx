@@ -1,8 +1,8 @@
 import { BookingStatus, BookingSummary, FlatRateOption } from '@/src/api/driverApp';
 import {
-  useFlagdownMutation,
-  useReportLocationMutation,
-  useUpdateBookingStatusMutation,
+    useFlagdownMutation,
+    useReportLocationMutation,
+    useUpdateBookingStatusMutation,
 } from '@/src/hooks/useDriverActions';
 import { useDriverBookings } from '@/src/hooks/useDriverBookings';
 import { useDriverFare } from '@/src/hooks/useDriverFare';
@@ -18,17 +18,17 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Animated,
-  Easing,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  useWindowDimensions,
-  View,
+    ActivityIndicator,
+    Animated,
+    Easing,
+    Modal,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    useWindowDimensions,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -155,6 +155,27 @@ export default function MeterScreen() {
       setSelectedFlatRateId(bookingFlatRate._id);
     }
   }, [booking, bookingFlatRate]);
+
+  // If the driver navigates away mid-trip and returns, resume the UI state
+  // so they don't need to press Start again. For meter-based trips we rely on
+  // the persisted meter state (meter.status). For dispatched flat-rate
+  // bookings the server marks the booking 'PickedUp' when the driver started
+  // the trip — use that to set the local tripStarted flag.
+  useEffect(() => {
+    // For flat-rate dispatched trips, resume if server shows PickedUp
+    if (isFlatRateTrip) {
+      if (booking?.status === 'PickedUp') {
+        setTripStarted(true);
+      }
+      return;
+    }
+    // For meter trips (flagdown or dispatched), if the meter hook reports
+    // running or paused (mid-trip), reflect that in the UI so the driver
+    // doesn't need to press Start again.
+    if (meter.status === 'running' || meter.status === 'paused') {
+      setTripStarted(true);
+    }
+  }, [isFlatRateTrip, booking?.status, meter.status]);
 
   useFocusEffect(
     useCallback(() => {
