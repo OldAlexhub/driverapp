@@ -119,8 +119,17 @@ function meterReducer(state: MeterState, action: MeterAction): MeterState {
           latitude: location.coords.latitude,
           longitude: location.coords.longitude,
         };
-        const deltaDistance = distanceBetween(prevCoords, nextCoords);
-        if (Number.isFinite(deltaDistance)) {
+        let deltaDistance = distanceBetween(prevCoords, nextCoords);
+        // Guard against implausible GPS jumps which can create huge one-off
+        // distance spikes (and therefore very large fares). If a very large
+        // delta is observed in a short time window, ignore it as likely bad
+        // GPS data rather than counting it toward the trip distance.
+        const MAX_REASONABLE_DELTA_METERS = 2000; // ~2km
+        if (!Number.isFinite(deltaDistance) || (deltaDistance > MAX_REASONABLE_DELTA_METERS && deltaSeconds < 10)) {
+          // treat as zero movement (ignore spike)
+          deltaDistance = 0;
+        }
+        if (Number.isFinite(deltaDistance) && deltaDistance > 0) {
           distanceMeters += deltaDistance;
         }
       }
@@ -249,6 +258,7 @@ export function useFlagdownMeter() {
   const [state, dispatch] = useReducer(meterReducer, initialState);
   const watcherRef = useRef<Location.LocationSubscription | null>(null);
   const isMounted = useRef(true);
+  const persistTimerRef = useRef<number | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
@@ -480,10 +490,17 @@ export function useFlagdownMeter() {
     })();
   }, [stopWatcher]);
 
-  // Persist meter state changes (throttle by writing only key fields)
+  // Persist meter state changes (debounced) to avoid hammering SecureStore on
+  // rapid location updates. Persist at most once per 1500ms of quiet.
   useEffect(() => {
     if (!hydrated) return;
-    (async () => {
+    try {
+      if (persistTimerRef.current) {
+        clearTimeout(persistTimerRef.current as unknown as number);
+      }
+    } catch (_e) {}
+
+    persistTimerRef.current = (setTimeout(async () => {
       try {
         const snapshot: MeterState = {
           status: state.status,
@@ -502,7 +519,16 @@ export function useFlagdownMeter() {
       } catch (e) {
         // best-effort only
       }
-    })();
+    }, 1500) as unknown) as number;
+
+    return () => {
+      try {
+        if (persistTimerRef.current) {
+          clearTimeout(persistTimerRef.current as unknown as number);
+          persistTimerRef.current = null;
+        }
+      } catch (_e) {}
+    };
   }, [state.status, state.startedAt, state.elapsedSeconds, state.distanceMeters, state.waitSeconds, state.lastTimestamp, state.idleAnchor, state.config, state.points, state.error, hydrated]);
 
   const totals = useMemo(() => {

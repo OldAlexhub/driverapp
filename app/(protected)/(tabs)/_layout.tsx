@@ -44,15 +44,7 @@ export default function TabsLayout() {
           ),
         }}
       />
-      <Tabs.Screen
-        name='diagnostics'
-        options={{
-          title: 'Diagnostics',
-          tabBarIcon: ({ color, size }) => (
-            <MaterialCommunityIcons name='bug-check-outline' color={color} size={size} />
-          ),
-        }}
-      />
+      {/* diagnostics route removed — no tab shown */}
     </Tabs>
   );
 }
