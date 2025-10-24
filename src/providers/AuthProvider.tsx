@@ -176,6 +176,16 @@ export function AuthProvider({ children }: PropsWithChildren) {
     [driver, initializing, setDriver, signIn, signOut, token],
   );
 
+  // Maintain a process-global token reference for non-React consumers that
+  // need to read the current auth token outside of React (e.g. global error
+  // reporters). This avoids calling React hooks outside components.
+  // Tests and other modules can import `getCurrentAuthToken`.
+  // eslint-disable-next-line no-undef
+  try {
+    // @ts-ignore - attach to module scope
+    (global as any).__CURRENT_DRIVER_AUTH_TOKEN = token;
+  } catch (_e) {}
+
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
@@ -185,4 +195,13 @@ export function useAuthContext() {
     throw new Error('useAuthContext must be used within an AuthProvider.');
   }
   return ctx;
+}
+
+export function getCurrentAuthToken(): string | null {
+  try {
+    // @ts-ignore
+    return (global as any).__CURRENT_DRIVER_AUTH_TOKEN ?? null;
+  } catch (_e) {
+    return null;
+  }
 }

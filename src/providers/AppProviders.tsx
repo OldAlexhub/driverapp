@@ -36,18 +36,18 @@ if (Platform.OS !== 'web') {
 export function AppProviders({ children }: PropsWithChildren) {
   // Setup global error handlers once per app init. We pass a token getter so
   // error reports can be uploaded when available.
-  try {
-    setupGlobalHandlers(() => {
-      try {
-        // lazy require to avoid cycles at module load
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { useAuthContext } = require('./AuthProvider');
-        const ctx = useAuthContext();
-        return ctx?.token ?? null;
-      } catch (_e) {
-        return null;
-      }
-    });
+    try {
+      setupGlobalHandlers(() => {
+        try {
+          // lazy require to avoid cycles at module load
+          // Import a non-hook token getter to avoid calling hooks outside components
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const { getCurrentAuthToken } = require('./AuthProvider');
+          return typeof getCurrentAuthToken === 'function' ? getCurrentAuthToken() : null;
+        } catch (_e) {
+          return null;
+        }
+      });
   } catch (_e) {}
 
   return (

@@ -527,7 +527,7 @@ export default function DashboardScreen() {
             </Text>
           </View>
           <View style={styles.row}>
-            <Text style={styles.label}>Today's on-duty minutes</Text>
+            <Text style={styles.label}>Today&apos;s on-duty minutes</Text>
             <Text style={styles.value}>{onDutyMinutesToday}</Text>
           </View>
           <View style={styles.row}>
