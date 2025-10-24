@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { acknowledgeDriverMessage, snoozeDriverMessage } from '../api/driverApp';
 import { useRealtime } from '../providers/RealtimeProvider';
+import { useAuth } from './useAuth';
 
 export type AdminMessage = {
   id?: string;
@@ -45,5 +47,41 @@ export default function useAdminMessages() {
 
   const dismiss = () => setMessage(null);
 
-  return { message, dismiss };
+  const { token } = useAuth();
+
+  const acknowledge = useCallback(
+    async (note?: string) => {
+      if (!message) return null;
+      try {
+        if (!token) throw new Error('Not authenticated');
+        await acknowledgeDriverMessage(token, String(message.id), note);
+        // notify local UI that we've acknowledged
+        setMessage(null);
+        return true;
+      } catch (err) {
+        console.warn('Failed to acknowledge admin message', err);
+        return false;
+      }
+    },
+    [message, token],
+  );
+
+  const snooze = useCallback(
+    async (minutes = 10) => {
+      if (!message) return null;
+      try {
+        if (!token) throw new Error('Not authenticated');
+        const res = await snoozeDriverMessage(token, String(message.id), minutes);
+        // dismiss locally after snooze
+        setMessage(null);
+        return res?.snoozeUntil || null;
+      } catch (err) {
+        console.warn('Failed to snooze admin message', err);
+        return null;
+      }
+    },
+    [message, token],
+  );
+
+  return { message, dismiss, acknowledge, snooze };
 }

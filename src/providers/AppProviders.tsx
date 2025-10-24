@@ -62,7 +62,7 @@ export function AppProviders({ children }: PropsWithChildren) {
 
 function ThemeBridge({ children }: PropsWithChildren) {
   const colorScheme = useColorScheme();
-  const { message, dismiss } = useAdminMessages();
+  const { message, dismiss, acknowledge, snooze } = useAdminMessages();
 
   return (
     <AuthProvider>
@@ -70,7 +70,7 @@ function ThemeBridge({ children }: PropsWithChildren) {
         <RecapProvider>
           <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
             {children}
-            <AdminMessageModal message={message} onClose={dismiss} />
+            <AdminMessageModal message={message} onClose={dismiss} onAcknowledge={acknowledge} onSnooze={snooze} />
           </ThemeProvider>
         </RecapProvider>
       </RealtimeProvider>

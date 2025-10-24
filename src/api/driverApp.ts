@@ -374,6 +374,30 @@ export async function registerDriverPushToken(
   });
 }
 
+export async function acknowledgeDriverMessage(
+  token: string,
+  messageId: string,
+  note?: string,
+): Promise<{ message: string }> {
+  return request(`/driver-app/messages/${messageId}/acknowledge`, {
+    method: 'POST',
+    token,
+    body: note ? { note } : {},
+  });
+}
+
+export async function snoozeDriverMessage(
+  token: string,
+  messageId: string,
+  minutes = 10,
+): Promise<{ message: string; snoozeUntil?: string }> {
+  return request(`/driver-app/messages/${messageId}/snooze`, {
+    method: 'POST',
+    token,
+    body: { minutes },
+  });
+}
+
 export interface AppendHosPayload {
   date: string; // YYYY-MM-DD
   minutes: number;

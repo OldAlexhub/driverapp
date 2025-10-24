@@ -5,9 +5,12 @@ import type { AdminMessage } from '../hooks/useAdminMessages';
 type Props = {
   message: AdminMessage | null;
   onClose: () => void;
+  onAcknowledge?: (note?: string) => Promise<boolean | null> | void;
+  onSnooze?: (minutes?: number) => Promise<string | null> | void;
+  onOpenDetails?: () => void;
 };
 
-export default function AdminMessageModal({ message, onClose }: Props) {
+export default function AdminMessageModal({ message, onClose, onAcknowledge, onSnooze, onOpenDetails }: Props) {
   if (!message) return null;
 
   const timeLabel = message.sendAt ? new Date(message.sendAt).toLocaleString() : '';
@@ -19,6 +22,28 @@ export default function AdminMessageModal({ message, onClose }: Props) {
         <Text style={styles.body}>{message.body || ''}</Text>
         {timeLabel ? <Text style={styles.time}>{timeLabel}</Text> : null}
         <View style={styles.actions}>
+          <TouchableOpacity
+            onPress={async () => {
+              try {
+                if (onAcknowledge) await onAcknowledge();
+              } catch (_e) {}
+            }}
+            style={[styles.button, styles.ackButton]}
+            accessibilityRole="button"
+          >
+            <Text style={styles.buttonText}>Acknowledge</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={async () => {
+              try {
+                if (onSnooze) await onSnooze(10);
+              } catch (_e) {}
+            }}
+            style={[styles.button, styles.snoozeButton]}
+            accessibilityRole="button"
+          >
+            <Text style={styles.buttonText}>Snooze</Text>
+          </TouchableOpacity>
           <TouchableOpacity onPress={onClose} style={styles.button} accessibilityRole="button">
             <Text style={styles.buttonText}>Close</Text>
           </TouchableOpacity>
@@ -57,6 +82,14 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 6,
+  },
+  ackButton: {
+    backgroundColor: '#10b981',
+    marginRight: 8,
+  },
+  snoozeButton: {
+    backgroundColor: '#f59e0b',
+    marginRight: 8,
   },
   buttonText: { color: '#fff', fontWeight: '600' },
 });
