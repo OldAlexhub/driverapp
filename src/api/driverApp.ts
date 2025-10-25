@@ -416,6 +416,23 @@ export async function getHosSummary(token: string, driverId?: string, days = 8):
   return request<any>(path, { token });
 }
 
+// Start an on-duty period. Server enforces required off-duty time and will
+// return 201 or 409 on conflict/violation.
+export async function startDuty(token: string): Promise<any> {
+  return request('/driver-app/hos/start', { method: 'POST', token });
+}
+
+// End an on-duty period. Server will persist duty end and split minutes into
+// daily DriverHOS entries.
+export async function endDuty(token: string): Promise<any> {
+  return request('/driver-app/hos/end', { method: 'POST', token });
+}
+
+// Fetch company profile (includes hosSettings)
+export async function getCompanyProfile(token?: string): Promise<any> {
+  return request('/company/profile', { token });
+}
+
 export async function uploadDiagnostics(token: string, payload: unknown): Promise<{ message: string }> {
   return request<{ message: string }>('/driver-app/diagnostics', { method: 'POST', token, body: payload });
 }

@@ -1,4 +1,4 @@
-import { appendHos, BookingStatus, BookingSummary } from '@/src/api/driverApp';
+import { ApiError, appendHos, BookingStatus, BookingSummary, endDuty, getCompanyProfile, startDuty } from '@/src/api/driverApp';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useAcknowledgeBooking, useDeclineBooking, useReportLocationMutation } from '@/src/hooks/useDriverActions';
 import { useDriverBookings } from '@/src/hooks/useDriverBookings';
@@ -6,7 +6,7 @@ import { useDriverLocation } from '@/src/hooks/useDriverLocation';
 import { useDriverProfile } from '@/src/hooks/useDriverProfile';
 import { useUpdatePresence } from '@/src/hooks/useUpdatePresence';
 import { useRealtime } from '@/src/providers/RealtimeProvider';
-import { getHos, setHos } from '@/src/services/hos';
+import { enqueueHosDelta, getHos, processPendingQueue, setHos } from '@/src/services/hos';
 import { formatCurrency } from '@/src/utils/format';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -57,6 +57,7 @@ export default function DashboardScreen() {
   const hours = active?.hoursOfService;
   const dutyStart = hours?.dutyStart ? dayjs(hours.dutyStart) : null;
   const [localDutyStart, setLocalDutyStart] = useState<string | null>(null);
+  const [hosSettings, setHosSettings] = useState<any | null>(null);
 
   const onDutyMinutesToday = useMemo(() => {
     if (!hours?.dutyStart) return hours?.onDutyMinutesToday || 0;
@@ -114,6 +115,19 @@ export default function DashboardScreen() {
         if (!cancelled && hos?.dutyStart) {
           setLocalDutyStart(hos.dutyStart as string);
         }
+        // fetch company hos settings for client-side warnings
+        try {
+          const cp = await getCompanyProfile(token);
+          if (!cancelled && cp?.company?.hosSettings) {
+            setHosSettings(cp.company.hosSettings);
+          }
+        } catch (_e) {
+          // ignore failure to fetch settings; server-side enforcement still applies
+        }
+          // attempt to flush any pending HOS deltas when the app wakes up
+          try {
+            processPendingQueue(token).catch(() => {});
+          } catch {}
       } catch {
         // ignore
       }
@@ -139,7 +153,16 @@ export default function DashboardScreen() {
       interval = setInterval(async () => {
         try {
           if (!token) return;
-          await appendHos(token, { date: dayjs().utc().format('YYYY-MM-DD'), minutes: 5 });
+          try {
+            await appendHos(token, { date: dayjs().utc().format('YYYY-MM-DD'), minutes: 5 });
+          } catch (e) {
+            // enqueue for retry/backoff
+            try {
+              await enqueueHosDelta({ date: dayjs().utc().format('YYYY-MM-DD'), minutes: 5 });
+              // attempt to flush pending queue
+              processPendingQueue(token).catch(() => {});
+            } catch {}
+          }
           try {
             await setHos({ dutyStart: activeDutyStart, lastReportedAt: new Date().toISOString() });
           } catch {} 
@@ -281,11 +304,25 @@ export default function DashboardScreen() {
     socket.on('assignment:new', handleAssignment);
     socket.on('assignment:cancelled', handleAssignmentCancelled);
     socket.on('message:new', handleDispatchMessage);
+    const handleHosAlert = (payload: any = {}) => {
+      try {
+        const note = payload?.note || payload?.message || 'HOS alert';
+        setFeedback(`[HOS] ${note}`);
+        // Haptic notification for high-priority event
+        try {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        } catch {}
+      } catch (err) {
+        console.warn('Error in handleHosAlert', err);
+      }
+    };
+    socket.on('hos:alert', handleHosAlert);
 
     return () => {
       socket.off('assignment:new', handleAssignment);
       socket.off('assignment:cancelled', handleAssignmentCancelled);
       socket.off('message:new', handleDispatchMessage);
+      socket.off('hos:alert', handleHosAlert);
       // cleanup sound on unmount
       (async () => {
             try {
@@ -436,10 +473,13 @@ export default function DashboardScreen() {
     setFeedback(null);
     setMutationError(null);
     try {
+      // Ask server to start duty (authoritative). If server rejects (409)
+      // due to insufficient off-duty time, surface the message and do not
+      // update local state.
+      await startDuty(token);
       const startIso = new Date().toISOString();
       await updatePresence({
         availability: 'Online',
-        status: 'Active',
         hoursOfService: { dutyStart: startIso },
         note: 'driver-app-start-shift',
       });
@@ -449,7 +489,11 @@ export default function DashboardScreen() {
       } catch (_e) {}
       setFeedback('Shift started. Stay safe out there.');
     } catch (err) {
-      setMutationError(err instanceof Error ? err.message : 'Unable to start shift.');
+      if (err instanceof ApiError && err.status === 409) {
+        setMutationError(err.message || 'Cannot start shift: off-duty requirement not met.');
+      } else {
+        setMutationError(err instanceof Error ? err.message : 'Unable to start shift.');
+      }
     }
   };
 
@@ -476,8 +520,21 @@ export default function DashboardScreen() {
         try {
           await appendHos(token, { date: dayjs().utc().format('YYYY-MM-DD'), minutes: remainingMinutes });
         } catch (e) {
-          // ignore; we still clear local state
+          // enqueue for retry/backoff
+          try {
+            await enqueueHosDelta({ date: dayjs().utc().format('YYYY-MM-DD'), minutes: remainingMinutes });
+            processPendingQueue(token).catch(() => {});
+          } catch {}
+          // continue; we still clear local state
         }
+      }
+      // Tell the server the duty ended so it can finalize and create daily
+      // HOS records. If this fails, we still clear local state but surface an error.
+      try {
+        await endDuty(token);
+      } catch (e) {
+        // log but continue to clear local state
+        console.warn('endDuty failed', e);
       }
 
       // update presence and clear local dutyStart
@@ -566,6 +623,19 @@ export default function DashboardScreen() {
             <Text style={styles.label}>Weekly on-duty minutes</Text>
             <Text style={styles.value}>{hours?.onDutyMinutes7d || 0}</Text>
           </View>
+
+          {hosSettings ? (() => {
+            const hrs = (onDutyMinutesToday || 0) / 60;
+            const alertH = Number(hosSettings?.ALERT_THRESHOLD_HOURS ?? 11.5);
+            const maxH = Number(hosSettings?.MAX_ON_DUTY_HOURS ?? 12);
+            if (hrs >= alertH && hrs < maxH) {
+              return <Text style={styles.warn}>Warning: approaching on-duty limit ({hrs.toFixed(2)}h of {maxH}h)</Text>;
+            }
+            if (hrs >= maxH) {
+              return <Text style={styles.error}>Violation risk: on-duty limit exceeded ({hrs.toFixed(2)}h)</Text>;
+            }
+            return null;
+          })() : null}
 
           <View style={styles.actionsRow}>
             <Pressable
@@ -879,6 +949,11 @@ const styles = StyleSheet.create({
   error: {
     marginTop: 16,
     color: '#f97316',
+  },
+  warn: {
+    marginTop: 12,
+    color: '#f59e0b',
+    fontWeight: '600',
   },
   muted: {
     color: '#94a3b8',
