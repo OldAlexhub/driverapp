@@ -19,7 +19,7 @@ async function readBuffer(): Promise<DiagnosticEntry[]> {
     const raw = await SecureStore.getItemAsync(STORE_KEY);
     if (!raw) return [];
     return JSON.parse(raw) as DiagnosticEntry[];
-  } catch (_e) {
+  } catch {
     return [];
   }
 }
@@ -27,7 +27,7 @@ async function readBuffer(): Promise<DiagnosticEntry[]> {
 async function writeBuffer(entries: DiagnosticEntry[]) {
   try {
     await SecureStore.setItemAsync(STORE_KEY, JSON.stringify(entries));
-  } catch (_e) {
+  } catch {
     // ignore
   }
 }
@@ -60,7 +60,7 @@ export async function logDiagnostic(entry: Omit<DiagnosticEntry, 'at'>) {
     // limit buffer size
     if (buf.length > 500) buf.splice(0, buf.length - 500);
     await writeBuffer(buf);
-  } catch (_e) {
+  } catch {
     // ignore
   }
 }
@@ -80,7 +80,7 @@ export async function flushDiagnostics(token?: string) {
       // if upload failed, keep buffer for retry
       console.warn('Diagnostics upload failed', e);
     }
-  } catch (_e) {}
+  } catch {}
 }
 
 export async function getDiagnostics(): Promise<DiagnosticEntry[]> {
@@ -90,7 +90,7 @@ export async function getDiagnostics(): Promise<DiagnosticEntry[]> {
 export async function clearDiagnostics(): Promise<void> {
   try {
     await SecureStore.deleteItemAsync(STORE_KEY);
-  } catch (_e) {}
+  } catch {}
 }
 
 export default {

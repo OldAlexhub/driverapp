@@ -1,8 +1,8 @@
 import { BookingStatus, BookingSummary, FlatRateOption } from '@/src/api/driverApp';
 import {
-    useFlagdownMutation,
-    useReportLocationMutation,
-    useUpdateBookingStatusMutation,
+  useFlagdownMutation,
+  useReportLocationMutation,
+  useUpdateBookingStatusMutation,
 } from '@/src/hooks/useDriverActions';
 import { useDriverBookings } from '@/src/hooks/useDriverBookings';
 import { useDriverFare } from '@/src/hooks/useDriverFare';
@@ -18,17 +18,17 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Animated,
-    Easing,
-    Modal,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    useWindowDimensions,
-    View,
+  ActivityIndicator,
+  Animated,
+  Easing,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -62,6 +62,9 @@ export default function MeterScreen() {
   const bookingId = Array.isArray(bookingIdParam) ? bookingIdParam[0] : bookingIdParam;
   const modeValue = Array.isArray(modeParam) ? modeParam[0] : modeParam;
   const isFlagdownMode = modeValue === 'flagdown' || !bookingId;
+  const viewOnlyParam = (params as any)?.viewOnly;
+  const viewOnlyValue = Array.isArray(viewOnlyParam) ? viewOnlyParam[0] : viewOnlyParam;
+  const isReadOnly = viewOnlyValue === '1' || viewOnlyValue === 'true';
 
   const { data: fareData, isLoading: isFareLoading, error: fareError, refetch: refetchFare } = useDriverFare();
   const { data: bookingsData, isLoading: isBookingsLoading } = useDriverBookings(
@@ -87,6 +90,16 @@ export default function MeterScreen() {
   const [recap, setRecap] = useState<RecapData | null>(null);
   const [recapVisible, setRecapVisible] = useState(false);
   const [finalBreakdown, setFinalBreakdown] = useState<FareBreakdown | null>(null);
+  // Guard to avoid opening the recap modal multiple times from overlapping async flows
+  const recapOpenRef = useRef(false);
+
+  const openRecapOnce = useCallback((recapData: RecapData | null, breakdown: FareBreakdown | null) => {
+    if (recapOpenRef.current) return;
+    recapOpenRef.current = true;
+    if (breakdown) setFinalBreakdown(breakdown);
+    if (recapData) setRecap(recapData);
+    setRecapVisible(true);
+  }, []);
 
   // Animated fare value for live count-up and small pulse on increases
   // initialize with 0 here; we'll animate to the actual computed value after it's available
@@ -191,6 +204,10 @@ export default function MeterScreen() {
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
+      // In read-only mode we must not start background location reporting or
+      // other side-effects. Exit early.
+      if (isReadOnly) return () => {};
+
       (async () => {
         try {
           await driverLocation.start({ distanceInterval: 10, timeInterval: 5000 });
@@ -205,7 +222,7 @@ export default function MeterScreen() {
         cancelled = true;
         driverLocation.stop();
       };
-    }, [driverLocation]),
+    }, [driverLocation, isReadOnly]),
   );
 
   useEffect(() => {
@@ -223,7 +240,7 @@ export default function MeterScreen() {
         const mod = await import('@/src/utils/offlineOutbox');
         const items = await mod.listOutbox();
         if (mounted) setOutboxCount(items.length);
-      } catch (e) {
+      } catch {
         // ignore
       }
     };
@@ -242,7 +259,8 @@ export default function MeterScreen() {
     // Only report booking location to the server when the driver is actively on a trip
     // (dispatched: EnRoute or PickedUp) or when running in flagdown mode (driver-initiated trip).
     // We still keep local live location updates for dispatch via updatePresence elsewhere.
-    const hasCoords = Boolean(driverLocation.location?.coords);
+  if (isReadOnly) return; // don't report location for read-only views
+  const hasCoords = Boolean(driverLocation.location?.coords);
     const isActiveTrip = isFlagdownMode || Boolean(
       booking?._id && (booking.dispatchMethod === 'flagdown' || ['EnRoute', 'PickedUp'].includes(booking.status))
     );
@@ -272,7 +290,7 @@ export default function MeterScreen() {
         accuracy: coords.accuracy ?? undefined,
       },
     });
-  }, [booking?._id, booking?.status, booking?.dispatchMethod, isFlagdownMode, driverLocation.location?.timestamp, driverLocation.location?.coords, reportLocation]);
+  }, [booking?._id, booking?.status, booking?.dispatchMethod, isFlagdownMode, driverLocation.location?.timestamp, driverLocation.location?.coords, reportLocation, isReadOnly]);
 
   const availableOtherFees = useMemo(() => {
     const baseFees = fareConfig?.otherFees ?? [];
@@ -332,7 +350,7 @@ export default function MeterScreen() {
         passengerCount: passengers,
         otherFees: selectedFees,
       });
-    } catch (err) {
+    } catch {
       return null;
     }
   }, [fareConfig, isFlatRateTrip, computedBreakdown, displayDistanceMiles, displayWaitMinutes, passengers, selectedFees]);
@@ -364,7 +382,7 @@ export default function MeterScreen() {
       try {
         // Medium impact provides a subtle, noticeable feedback on most devices
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      } catch (e) {
+      } catch {
         // ignore if haptics unavailable
       }
     }
@@ -373,14 +391,15 @@ export default function MeterScreen() {
 
   // Subscribe to animated value updates and set a numeric displayedFare for formatting
   useEffect(() => {
-    const id = animatedFare.current.addListener(({ value }: { value: number }) => {
+    const af = animatedFare.current;
+    const id = af.addListener(({ value }: { value: number }) => {
       setDisplayedFare(Number.isFinite(value) ? Number(value) : 0);
     });
     // initialize
     setDisplayedFare(Number.isFinite(previousFareRef.current) ? previousFareRef.current : 0);
     return () => {
-      if (animatedFare.current && id) {
-        animatedFare.current.removeListener(id);
+      if (af && id) {
+        af.removeListener(id);
       }
     };
   }, []);
@@ -397,9 +416,8 @@ export default function MeterScreen() {
     const activate = async () => {
       try {
         // dynamic import to avoid top-level native module issues
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        keepModule = require('expo-keep-awake');
-        if (keepModule && keepModule.default) keepModule = keepModule.default;
+        const mod = await import('expo-keep-awake');
+        keepModule = mod && (mod.default ?? mod);
         if (!keepModule) return;
         if (typeof keepModule.activateKeepAwakeAsync === 'function') {
           await keepModule.activateKeepAwakeAsync();
@@ -411,9 +429,9 @@ export default function MeterScreen() {
           keepModule.activate();
           active = true;
         }
-      } catch (e) {
+      } catch (err) {
         // best-effort only
-        if (typeof __DEV__ !== 'undefined' && __DEV__) console.debug('[meter] keep-awake activation failed', e);
+        if (typeof __DEV__ !== 'undefined' && __DEV__) console.debug('[meter] keep-awake activation failed', err);
       }
     };
 
@@ -483,6 +501,10 @@ export default function MeterScreen() {
   };
 
   const handleStartTrip = useCallback(async () => {
+    if (isReadOnly) {
+      setActionError('Read-only view — cannot start trip.');
+      return;
+    }
     if (!fareConfig) return;
     setActionError(null);
     // clear any previous final fare when starting a new trip
@@ -523,9 +545,13 @@ export default function MeterScreen() {
       const message = error instanceof Error ? error.message : 'Unable to start trip.';
       setMeterError(message);
     }
-  }, [booking, effectiveFlatRate?._id, fareConfig, isFlatRateTrip, meter, tripStarted, updateBookingStatus]);
+  }, [booking, effectiveFlatRate?._id, fareConfig, isFlatRateTrip, meter, tripStarted, updateBookingStatus, isReadOnly]);
 
   const handleEndTrip = useCallback(async () => {
+    if (isReadOnly) {
+      setActionError('Read-only view — cannot end trip.');
+      return;
+    }
     if (submitting || !fareConfig) return;
     if (!isFlatRateTrip && !isRunningStatus(meter.status)) {
       return;
@@ -549,7 +575,7 @@ export default function MeterScreen() {
           currentLocation = fresh;
           lastLocationRef.current = fresh;
         }
-      } catch (err) {
+      } catch {
         // ignore GPS fetch errors and fall back to last known position
       } finally {
         setStatusMessage(prevStatus);
@@ -570,11 +596,11 @@ export default function MeterScreen() {
         // 'completed' to reduce race conditions when reading totals immediately.
         const waitForCompleted = async (timeoutMs = 1500, intervalMs = 100) => {
           const start = Date.now();
-          // eslint-disable-next-line no-constant-condition
+           
           while (Date.now() - start < timeoutMs) {
             if (meter.status === 'completed') return true;
             // small delay
-            // eslint-disable-next-line no-await-in-loop
+             
             await new Promise((r) => setTimeout(r, intervalMs));
           }
           return false;
@@ -649,7 +675,7 @@ export default function MeterScreen() {
               createdAt: Date.now(),
             });
             setStatusMessage('Trip saved locally and will be submitted when back online.');
-          } catch (e) {
+          } catch {
             // fallback: surface original error
             throw err;
           }
@@ -685,7 +711,7 @@ export default function MeterScreen() {
                 },
               });
               await queryClient.refetchQueries({ queryKey: ['driverBookings'], exact: false });
-            } catch (err) {
+            } catch {
               // enqueue completion if update fails
               const { enqueueOutbox } = await import('@/src/utils/offlineOutbox');
               await enqueueOutbox({
@@ -707,7 +733,7 @@ export default function MeterScreen() {
               setStatusMessage('Trip saved locally and will be submitted when back online.');
             }
           }
-        } catch (err) {
+        } catch {
           // createFlagdown failed (likely offline) - enqueue the whole operation
           const { enqueueOutbox } = await import('@/src/utils/offlineOutbox');
           await enqueueOutbox({
@@ -730,20 +756,21 @@ export default function MeterScreen() {
         }
       }
 
-      setFinalBreakdown(breakdown);
-      setRecap({
-        fare: breakdown,
-        distanceMiles,
-        waitMinutes,
-        elapsedSeconds,
-        passengers,
-        otherFees: selectedFees,
-        flatRateName: effectiveFlatRate?.name,
-        tripLabel: booking
-          ? `Booking #${booking.bookingId ?? booking._id.slice(-6)}`
-          : 'Flagdown ride',
-      });
-      setRecapVisible(true);
+      // Open recap once (guarded) to avoid duplicate openings when multiple async
+      // operations (createFlagdown + updateBookingStatus + query refetch)
+      openRecapOnce(
+        {
+          fare: breakdown,
+          distanceMiles,
+          waitMinutes,
+          elapsedSeconds,
+          passengers,
+          otherFees: selectedFees,
+          flatRateName: effectiveFlatRate?.name,
+          tripLabel: booking ? `Booking #${booking.bookingId ?? booking._id.slice(-6)}` : 'Flagdown ride',
+        },
+        breakdown,
+      );
       setStatusMessage('Trip submitted.');
       meter.reset();
       setTripStarted(false);
@@ -757,18 +784,26 @@ export default function MeterScreen() {
     booking,
     computedBreakdown,
     createFlagdown,
+    driverLocation,
     effectiveFlatRate,
     fareConfig,
     flagdownDropoff,
+    isFlagdownMode,
     isFlatRateTrip,
+    isReadOnly,
     meter,
+    openRecapOnce,
     passengers,
+    queryClient,
     selectedFees,
+    statusMessage,
     submitting,
     updateBookingStatus,
   ]);
 
   const handleDismissRecap = () => {
+    // clear guard so future trips can open the recap again
+    recapOpenRef.current = false;
     setRecapVisible(false);
     setFinalBreakdown(null);
     router.replace('/(protected)/(tabs)/dashboard');
@@ -787,6 +822,7 @@ export default function MeterScreen() {
 
   // Helper to actually perform the submission that was deferred by the large-trip guard
   const performPendingSubmission = useCallback(async () => {
+    if (isReadOnly) return; // do nothing in read-only mode
     if (!pendingSubmission) return;
     setSubmitting(true);
     setActionError(null);
@@ -839,18 +875,20 @@ export default function MeterScreen() {
         }
       }
 
-      setFinalBreakdown(breakdown);
-      setRecap({
-        fare: breakdown,
-        distanceMiles,
-        waitMinutes,
-        elapsedSeconds,
-        passengers,
-        otherFees: selectedFees,
-        flatRateName: effectiveFlatRate?.name,
-        tripLabel: booking ? `Booking #${booking.bookingId ?? booking._id.slice(-6)}` : 'Flagdown ride',
-      });
-      setRecapVisible(true);
+      // Use guarded opener here too (for the deferred submission flow)
+      openRecapOnce(
+        {
+          fare: breakdown,
+          distanceMiles,
+          waitMinutes,
+          elapsedSeconds,
+          passengers,
+          otherFees: selectedFees,
+          flatRateName: effectiveFlatRate?.name,
+          tripLabel: booking ? `Booking #${booking.bookingId ?? booking._id.slice(-6)}` : 'Flagdown ride',
+        },
+        breakdown,
+      );
       setStatusMessage('Trip submitted.');
       meter.reset();
       setTripStarted(false);
@@ -861,7 +899,7 @@ export default function MeterScreen() {
       setSubmitting(false);
       setPendingSubmission(null);
     }
-  }, [pendingSubmission, booking, updateBookingStatus, queryClient, createFlagdown, flagdownDropoff, isFlatRateTrip, effectiveFlatRate, passengers, selectedFees, meter]);
+  }, [pendingSubmission, booking, updateBookingStatus, queryClient, createFlagdown, flagdownDropoff, isFlatRateTrip, effectiveFlatRate, passengers, selectedFees, meter, isReadOnly, openRecapOnce]);
 
   // If compact mode (landscape or forced), render a minimal meter UI and exit early
   // This makes the compact experience immediate and removes other UI chrome.
@@ -973,6 +1011,12 @@ export default function MeterScreen() {
           <Text style={styles.smallStatus}>{isFlatRateTrip ? (tripStarted ? 'Flat rate' : 'Ready') : meter.status.toUpperCase()}</Text>
         </View>
 
+        {isReadOnly ? (
+          <View style={{ backgroundColor: '#0b1220', padding: 10, borderRadius: 12, marginHorizontal: 16, marginTop: 8, borderWidth: 1, borderColor: '#334155' }}>
+            <Text style={{ color: '#94a3b8', textAlign: 'center' }}>Read-only — viewing historical trip details. Tap &apos;Open editable meter&apos; to make changes.</Text>
+          </View>
+        ) : null}
+
         {statusMessage ? <Text style={styles.success}>{statusMessage}</Text> : null}
         {actionError ? <Text style={styles.error}>{actionError}</Text> : null}
         {meterError ? <Text style={styles.error}>{meterError}</Text> : null}
@@ -1060,13 +1104,17 @@ export default function MeterScreen() {
             {booking?.dropoffAddress ? (
               <Text style={styles.addressText}>{booking.dropoffAddress}</Text>
             ) : isFlagdownMode ? (
-              <TextInput
-                value={flagdownDropoff}
-                onChangeText={setFlagdownDropoff}
-                placeholder="Enter dropoff address (optional)"
-                placeholderTextColor="#64748b"
-                style={styles.inlineInput}
-              />
+              isReadOnly ? (
+                <Text style={styles.addressText}>{flagdownDropoff || 'Dropoff TBD'}</Text>
+              ) : (
+                <TextInput
+                  value={flagdownDropoff}
+                  onChangeText={setFlagdownDropoff}
+                  placeholder="Enter dropoff address (optional)"
+                  placeholderTextColor="#64748b"
+                  style={styles.inlineInput}
+                />
+              )
             ) : (
               <Text style={styles.addressText}>Dropoff TBD</Text>
             )}
@@ -1087,20 +1135,31 @@ export default function MeterScreen() {
         ) : null}
 
         <View style={styles.controlsStack}>
-          <Pressable
-            style={[styles.bigControlButton, styles.controlStart, startDisabled && styles.controlDisabled]}
-            disabled={startDisabled}
-            onPress={handleStartTrip}
-          >
-            {submitting ? <ActivityIndicator color="#0f172a" /> : <Text style={styles.bigControlText}>Start Trip</Text>}
-          </Pressable>
-          <Pressable
-            style={[styles.bigControlButton, styles.controlEnd, stopDisabled && styles.controlDisabled]}
-            disabled={stopDisabled}
-            onPress={handleEndTrip}
-          >
-            {submitting ? <ActivityIndicator color="#f8fafc" /> : <Text style={styles.bigControlText}>End Trip</Text>}
-          </Pressable>
+          {isReadOnly ? (
+            <Pressable
+              style={[styles.bigControlButton, styles.controlStart]}
+              onPress={() => router.push({ pathname: '/(protected)/meter', params: { bookingId } })}
+            >
+              <Text style={styles.bigControlText}>Open editable meter</Text>
+            </Pressable>
+          ) : (
+            <>
+              <Pressable
+                style={[styles.bigControlButton, styles.controlStart, startDisabled && styles.controlDisabled]}
+                disabled={startDisabled}
+                onPress={handleStartTrip}
+              >
+                {submitting ? <ActivityIndicator color="#0f172a" /> : <Text style={styles.bigControlText}>Start Trip</Text>}
+              </Pressable>
+              <Pressable
+                style={[styles.bigControlButton, styles.controlEnd, stopDisabled && styles.controlDisabled]}
+                disabled={stopDisabled}
+                onPress={handleEndTrip}
+              >
+                {submitting ? <ActivityIndicator color="#f8fafc" /> : <Text style={styles.bigControlText}>End Trip</Text>}
+              </Pressable>
+            </>
+          )}
         </View>
 
         {/* Other fees: always visible for quick access */}
@@ -1109,6 +1168,15 @@ export default function MeterScreen() {
           {availableOtherFees.length ? (
             availableOtherFees.map((fee) => {
               const active = selectedFeeNames.includes(fee.name);
+              // Render non-interactive fee chips in read-only mode
+              if (isReadOnly) {
+                return (
+                  <View key={fee.name} style={[styles.feeChip, active && styles.feeChipActive]}>
+                    <Text style={[styles.feeChipLabel, active && styles.feeChipLabelActive]}>{fee.name}</Text>
+                    <Text style={[styles.feeChipAmount, active && styles.feeChipLabelActive]}>{formatCurrency(Number(fee.amount ?? 0))}</Text>
+                  </View>
+                );
+              }
               return (
                 <Pressable
                   key={fee.name}
@@ -1136,47 +1204,73 @@ export default function MeterScreen() {
           <View style={styles.card}>
             <View style={styles.rowBetween}>
               <Text style={styles.label}>Passengers</Text>
-              <View style={styles.counter}>
-                <Pressable
-                  style={[styles.counterButton, passengers <= 1 && styles.counterDisabled]}
-                  disabled={passengers <= 1}
-                  onPress={() => handlePassengerChange(-1)}
-                >
-                  <Text style={styles.counterButtonText}>-</Text>
-                </Pressable>
-                <Text style={styles.counterValue}>{passengers}</Text>
-                <Pressable
-                  style={[styles.counterButton, passengers >= 8 && styles.counterDisabled]}
-                  disabled={passengers >= 8}
-                  onPress={() => handlePassengerChange(1)}
-                >
-                  <Text style={styles.counterButtonText}>+</Text>
-                </Pressable>
-              </View>
+              {isReadOnly ? (
+                <Text style={styles.counterValue}>{passengers} pax</Text>
+              ) : (
+                <View style={styles.counter}>
+                  <Pressable
+                    style={[styles.counterButton, passengers <= 1 && styles.counterDisabled]}
+                    disabled={passengers <= 1}
+                    onPress={() => handlePassengerChange(-1)}
+                  >
+                    <Text style={styles.counterButtonText}>-</Text>
+                  </Pressable>
+                  <Text style={styles.counterValue}>{passengers}</Text>
+                  <Pressable
+                    style={[styles.counterButton, passengers >= 8 && styles.counterDisabled]}
+                    disabled={passengers >= 8}
+                    onPress={() => handlePassengerChange(1)}
+                  >
+                    <Text style={styles.counterButtonText}>+</Text>
+                  </Pressable>
+                </View>
+              )}
             </View>
 
             {isFlagdownMode && !bookingFlatRate ? (
               <View style={styles.flatRateSelector}>
                 <Text style={styles.label}>Flat rate zone</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.flatRateChips}>
-                  <Pressable
-                    style={[styles.flatRateChip, !selectedFlatRateId && styles.flatRateChipActive]}
-                    onPress={() => handleFlatRateSelect(null)}
-                  >
-                    <Text style={styles.flatRateChipTitle}>Meter fare</Text>
-                    <Text style={styles.flatRateChipSubtitle}>Use admin meter configuration</Text>
-                  </Pressable>
-                  {flatRates.map((rate) => (
-                    <Pressable
-                      key={rate._id}
-                      style={[styles.flatRateChip, selectedFlatRateId === rate._id && styles.flatRateChipActive]}
-                      onPress={() => handleFlatRateSelect(rate._id)}
-                    >
-                      <Text style={styles.flatRateChipTitle}>{rate.name}</Text>
-                      <Text style={styles.flatRateChipAmount}>{formatCurrency(Number(rate.amount ?? 0))}</Text>
-                      {rate.distanceLabel ? <Text style={styles.flatRateChipSubtitle}>{rate.distanceLabel}</Text> : null}
-                    </Pressable>
-                  ))}
+                  {isReadOnly ? (
+                    // Render a non-interactive list of rates in read-only mode
+                    <View style={{ flexDirection: 'row', gap: 12 }}>
+                      <View style={[styles.flatRateChip, !selectedFlatRateId && styles.flatRateChipActive]}>
+                        <Text style={styles.flatRateChipTitle}>Meter fare</Text>
+                        <Text style={styles.flatRateChipSubtitle}>Use admin meter configuration</Text>
+                      </View>
+                      {flatRates.map((rate) => (
+                        <View
+                          key={rate._id}
+                          style={[styles.flatRateChip, selectedFlatRateId === rate._id && styles.flatRateChipActive]}
+                        >
+                          <Text style={styles.flatRateChipTitle}>{rate.name}</Text>
+                          <Text style={styles.flatRateChipAmount}>{formatCurrency(Number(rate.amount ?? 0))}</Text>
+                          {rate.distanceLabel ? <Text style={styles.flatRateChipSubtitle}>{rate.distanceLabel}</Text> : null}
+                        </View>
+                      ))}
+                    </View>
+                  ) : (
+                    <>
+                      <Pressable
+                        style={[styles.flatRateChip, !selectedFlatRateId && styles.flatRateChipActive]}
+                        onPress={() => handleFlatRateSelect(null)}
+                      >
+                        <Text style={styles.flatRateChipTitle}>Meter fare</Text>
+                        <Text style={styles.flatRateChipSubtitle}>Use admin meter configuration</Text>
+                      </Pressable>
+                      {flatRates.map((rate) => (
+                        <Pressable
+                          key={rate._id}
+                          style={[styles.flatRateChip, selectedFlatRateId === rate._id && styles.flatRateChipActive]}
+                          onPress={() => handleFlatRateSelect(rate._id)}
+                        >
+                          <Text style={styles.flatRateChipTitle}>{rate.name}</Text>
+                          <Text style={styles.flatRateChipAmount}>{formatCurrency(Number(rate.amount ?? 0))}</Text>
+                          {rate.distanceLabel ? <Text style={styles.flatRateChipSubtitle}>{rate.distanceLabel}</Text> : null}
+                        </Pressable>
+                      ))}
+                    </>
+                  )}
                 </ScrollView>
               </View>
             ) : null}
@@ -1265,15 +1359,6 @@ function DetailRow({ label, value, action, highlight }: { label: string; value: 
     <View style={styles.detailRow}>
       <Text style={styles.detailLabel}>{label}</Text>
       {action ? action : <Text style={[styles.detailValue, highlight && styles.detailHighlight]}>{value}</Text>}
-    </View>
-  );
-}
-
-function Metric({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
-  return (
-    <View style={[styles.metricCard, highlight && styles.metricHighlight]}>
-      <Text style={[styles.metricLabel, highlight && styles.metricHighlightLabel]}>{label}</Text>
-      <Text style={[styles.metricValue, highlight && styles.metricHighlightValue]}>{value}</Text>
     </View>
   );
 }

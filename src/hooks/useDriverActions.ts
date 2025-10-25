@@ -77,17 +77,17 @@ export function useUpdateBookingStatusMutation() {
             // Lazy require to avoid circular dependencies during module import.
             // Require the provider module and call the exported global helper if present.
             // Use a relative path so bundlers/resolvers can find the file reliably.
-            // eslint-disable-next-line global-require, @typescript-eslint/no-var-requires
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
             const mod = require('../providers/RecapProvider');
             const show = mod?.showRecapGlobal ?? mod?.showRecap ?? null;
             if (typeof show === 'function') {
               show(recapPayload);
             }
-          } catch (_e) {
+          } catch {
             // ignore: recap is optional
           }
         }
-      } catch (_e) {
+      } catch {
         // no-op: recap is an optional enhancement
       }
     },

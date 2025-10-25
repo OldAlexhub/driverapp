@@ -29,28 +29,18 @@ export default function SplashVideo() {
 
   // Simple splash: navigate after a small delay to allow initial paint,
   // then ensure minimum splash duration via finishWhenReady.
-  useEffect(() => {
-    if (!loading) {
-      const t = setTimeout(() => {
-        try {
-          handleFinish();
-        } catch (_e) {}
-      }, 300);
-      return () => clearTimeout(t);
-    }
-    return;
-  }, [loading]);
-  const { initializing, token } = useAuth();
+  
+  const { token } = useAuth();
 
   const finishWhenReady = useCallback(() => {
     const started = startedAtRef.current ?? Date.now();
     const elapsed = Date.now() - started;
     const remaining = Math.max(0, MIN_SPLASH_MS - elapsed);
-    if (remaining > 0) {
+      if (remaining > 0) {
       setTimeout(() => {
         try {
           finishWhenReady();
-        } catch (_e) {}
+        } catch {}
       }, remaining);
       return;
     }
@@ -61,7 +51,7 @@ export default function SplashVideo() {
       } else {
         router.replace('/(auth)/login');
       }
-    } catch (_e) {
+    } catch {
       // swallow navigation errors during teardown
     }
   }, [router, token]);
@@ -71,10 +61,24 @@ export default function SplashVideo() {
     // If the video finished early, ensure we still respect minimum splash time.
     try {
       finishWhenReady();
-    } catch (_e) {
+    } catch {
       // swallow
     }
   }, [finishWhenReady]);
+
+  useEffect(() => {
+    if (!loading) {
+      const t = setTimeout(() => {
+        try {
+          handleFinish();
+        } catch {
+          // swallow
+        }
+      }, 300);
+      return () => clearTimeout(t);
+    }
+    return;
+  }, [loading, handleFinish]);
 
   return (
     <SafeAreaView style={styles.container}>

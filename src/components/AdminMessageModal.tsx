@@ -26,7 +26,9 @@ export default function AdminMessageModal({ message, onClose, onAcknowledge, onS
             onPress={async () => {
               try {
                 if (onAcknowledge) await onAcknowledge();
-              } catch (_e) {}
+              } catch {
+                // ignore
+              }
             }}
             style={[styles.button, styles.ackButton]}
             accessibilityRole="button"
@@ -37,7 +39,9 @@ export default function AdminMessageModal({ message, onClose, onAcknowledge, onS
             onPress={async () => {
               try {
                 if (onSnooze) await onSnooze(10);
-              } catch (_e) {}
+              } catch {
+                // ignore
+              }
             }}
             style={[styles.button, styles.snoozeButton]}
             accessibilityRole="button"

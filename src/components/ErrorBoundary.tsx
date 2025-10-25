@@ -12,7 +12,9 @@ export class ErrorBoundary extends React.Component<React.PropsWithChildren<{}>, 
     try {
       // Dont await
       reportRuntimeError({ message: error.message, stack: error.stack || null, fatal: false });
-    } catch (_e) {}
+    } catch {
+      // ignore
+    }
   }
 
   render() {

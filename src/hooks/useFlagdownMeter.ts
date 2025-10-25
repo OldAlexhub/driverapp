@@ -286,8 +286,10 @@ export function useFlagdownMeter() {
           await SecureStore.setItemAsync('taxiops:meterState', JSON.stringify(snapshot));
           try {
             logDiagnostic({ level: 'info', tag: 'meter.unmount', message: 'persisted snapshot on unmount', payload: { status: s.status } });
-          } catch (_e) {}
-        } catch (_e) {
+          } catch {
+            // ignore
+          }
+        } catch {
           // best-effort only
         }
       })();
@@ -318,7 +320,7 @@ export function useFlagdownMeter() {
         if (parsed && !cancelled) {
           dispatch({ type: 'HYDRATE', payload: parsed });
         }
-      } catch (e) {
+      } catch {
         // ignore parse errors
       } finally {
         setHydrated(true);
@@ -403,12 +405,16 @@ export function useFlagdownMeter() {
           await startWatcher();
           try {
             logDiagnostic({ level: 'info', tag: 'meter.hydrate', message: 'restarted watcher after hydrate' });
-          } catch (_e) {}
+          } catch {
+            // ignore
+          }
         }
       } catch (e) {
         try {
           logDiagnostic({ level: 'error', tag: 'meter.hydrate', message: 'failed to restart watcher after hydrate', payload: { error: String(e) } });
-        } catch (_e) {}
+        } catch {
+          // ignore
+        }
       }
     })();
   }, [hydrated, state.status, startWatcher]);
@@ -442,7 +448,9 @@ export function useFlagdownMeter() {
               await SecureStore.setItemAsync('taxiops:meterState', JSON.stringify(snapshot));
               try {
                 logDiagnostic({ level: 'info', tag: 'meter.appstate', message: 'persisted on background', payload: { status: state.status } });
-              } catch (_e) {}
+              } catch {
+                // ignore
+              }
             } catch (_e) {}
           })();
         }
@@ -454,16 +462,22 @@ export function useFlagdownMeter() {
                 await startWatcher();
                 try {
                   logDiagnostic({ level: 'info', tag: 'meter.appstate', message: 'restarted watcher on foreground' });
-                } catch (_e) {}
+                } catch {
+                  // ignore
+                }
               } catch (e) {
                 try {
                   logDiagnostic({ level: 'error', tag: 'meter.appstate', message: 'failed to restart watcher', payload: { error: String(e) } });
-                } catch (_e) {}
+                } catch {
+                  // ignore
+                }
               }
             })();
           }
         }
-      } catch (_e) {}
+      } catch {
+        // ignore
+      }
     });
     return () => sub.remove();
   }, [state.status, state.points, state.elapsedSeconds]);
@@ -495,7 +509,9 @@ export function useFlagdownMeter() {
         });
           try {
             logDiagnostic({ level: 'info', tag: 'meter.start', message: 'Meter started', payload: { timestamp, hasInitialLocation: Boolean(initialLocation) } });
-          } catch (_e) {}
+          } catch {
+            // ignore
+          }
         await startWatcher();
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unable to start meter.';
@@ -503,7 +519,9 @@ export function useFlagdownMeter() {
         try {
           const snapshot = { appState: AppState.currentState };
           logDiagnostic({ level: 'error', tag: 'meter.start.error', message: message, payload: { error: String(error), snapshot } });
-        } catch (_e) {}
+        } catch {
+          // ignore
+        }
         throw error;
       }
     },
@@ -516,7 +534,9 @@ export function useFlagdownMeter() {
     dispatch({ type: 'PAUSE' });
     try {
       logDiagnostic({ level: 'info', tag: 'meter.pause', message: 'Meter paused', payload: { appState: AppState.currentState } });
-    } catch (_e) {}
+    } catch {
+      // ignore
+    }
   }, [state.status, stopWatcher]);
 
   const resume = useCallback(async () => {
@@ -531,7 +551,9 @@ export function useFlagdownMeter() {
     dispatch({ type: 'STOP', payload: { timestamp: Date.now() } });
     try {
       logDiagnostic({ level: 'info', tag: 'meter.stop', message: 'Meter stopped', payload: { appState: AppState.currentState } });
-    } catch (_e) {}
+    } catch {
+      // ignore
+    }
   }, [state.status, stopWatcher]);
 
   const reset = useCallback(() => {
@@ -539,12 +561,16 @@ export function useFlagdownMeter() {
     dispatch({ type: 'RESET' });
     try {
       logDiagnostic({ level: 'info', tag: 'meter.reset', message: 'Meter reset' });
-    } catch (_e) {}
+    } catch {
+      // ignore
+    }
     // Remove persisted snapshot when reset
     (async () => {
       try {
         await SecureStore.deleteItemAsync('taxiops:meterState');
-      } catch (_e) {}
+      } catch {
+        // ignore
+      }
     })();
   }, [stopWatcher]);
 
@@ -556,7 +582,9 @@ export function useFlagdownMeter() {
       if (persistTimerRef.current) {
         clearTimeout(persistTimerRef.current as unknown as number);
       }
-    } catch (_e) {}
+    } catch {
+      // ignore
+    }
 
     persistTimerRef.current = (setTimeout(async () => {
       try {
@@ -574,7 +602,7 @@ export function useFlagdownMeter() {
           error: state.error,
         };
         await SecureStore.setItemAsync('taxiops:meterState', JSON.stringify(snapshot));
-      } catch (e) {
+        } catch {
         // best-effort only
       }
     }, 1500) as unknown) as number;
@@ -585,7 +613,9 @@ export function useFlagdownMeter() {
           clearTimeout(persistTimerRef.current as unknown as number);
           persistTimerRef.current = null;
         }
-      } catch (_e) {}
+      } catch {
+        // ignore
+      }
     };
   }, [state.status, state.startedAt, state.elapsedSeconds, state.distanceMeters, state.waitSeconds, state.lastTimestamp, state.idleAnchor, state.config, state.points, state.error, hydrated]);
 

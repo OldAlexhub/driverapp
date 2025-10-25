@@ -39,17 +39,19 @@ export function AppProviders({ children }: PropsWithChildren) {
   // error reports can be uploaded when available.
     try {
       setupGlobalHandlers(() => {
-        try {
-          // lazy require to avoid cycles at module load
-          // Import a non-hook token getter to avoid calling hooks outside components
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
-          const { getCurrentAuthToken } = require('./AuthProvider');
-          return typeof getCurrentAuthToken === 'function' ? getCurrentAuthToken() : null;
-        } catch (_e) {
-          return null;
-        }
+          try {
+            // lazy require to avoid cycles at module load
+            // Import a non-hook token getter to avoid calling hooks outside components
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { getCurrentAuthToken } = require('./AuthProvider');
+            return typeof getCurrentAuthToken === 'function' ? getCurrentAuthToken() : null;
+          } catch {
+            return null;
+          }
       });
-  } catch (_e) {}
+    } catch {
+      // ignore
+    }
 
   return (
     <QueryClientProvider client={queryClient}>

@@ -61,23 +61,33 @@ export function RealtimeProvider({ children }: PropsWithChildren) {
         // attempt to flush any buffered diagnostics and queued outbox entries now that we're authenticated and online
         try {
           flushDiagnostics(token).catch(() => {});
-        } catch (_e) {}
+        } catch {
+          // ignore
+        }
         try {
           flushOutbox(token).catch(() => {});
-        } catch (_e) {}
-      } catch (_e) {}
+        } catch {
+          // ignore
+        }
+      } catch {
+        // ignore
+      }
     };
     const handleDisconnect = (reason?: any) => {
       setConnected(false);
       try {
         logDiagnostic({ level: 'warn', tag: 'realtime.disconnect', message: 'socket disconnected', payload: { reason, url } });
-      } catch (_e) {}
+      } catch {
+        // ignore
+      }
     };
     const handleError = (error: any) => {
       console.warn('Realtime connection error', error);
       try {
         logDiagnostic({ level: 'error', tag: 'realtime.error', message: String(error?.message ?? error), payload: { error, url } });
-      } catch (_e) {}
+      } catch {
+        // ignore
+      }
     };
 
     client.on('connect', handleConnect);

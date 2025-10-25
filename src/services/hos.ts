@@ -16,7 +16,7 @@ export async function getHos(): Promise<HosState> {
     const raw = await SecureStore.getItemAsync(HOS_KEY);
     if (!raw) return {};
     return JSON.parse(raw);
-  } catch (e) {
+  } catch {
     return {};
   }
 }
@@ -24,7 +24,7 @@ export async function getHos(): Promise<HosState> {
 export async function setHos(state: HosState): Promise<void> {
   try {
     await SecureStore.setItemAsync(HOS_KEY, JSON.stringify(state));
-  } catch (e) {
+  } catch {
     // ignore
   }
 }
@@ -32,7 +32,7 @@ export async function setHos(state: HosState): Promise<void> {
 export async function clearHos(): Promise<void> {
   try {
     await SecureStore.deleteItemAsync(HOS_KEY);
-  } catch (e) {}
+  } catch {}
 }
 
 export default { getHos, setHos, clearHos };

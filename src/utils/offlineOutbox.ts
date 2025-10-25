@@ -24,7 +24,7 @@ async function readOutbox(): Promise<OutboxItem[]> {
     const raw = await SecureStore.getItemAsync(OUTBOX_KEY);
     if (!raw) return [];
     return JSON.parse(raw) as OutboxItem[];
-  } catch (e) {
+  } catch {
     return [];
   }
 }

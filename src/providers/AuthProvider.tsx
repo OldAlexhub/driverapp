@@ -7,12 +7,12 @@ import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import { PropsWithChildren, createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import {
-  ApiError,
-  DriverAppLoginRequest,
-  DriverLoginResponse,
-  DriverSummary,
-  driverLogin,
-  driverLogout,
+    ApiError,
+    DriverAppLoginRequest,
+    DriverLoginResponse,
+    DriverSummary,
+    driverLogin,
+    driverLogout,
 } from '../api/driverApp';
 
 type AuthContextValue = {
@@ -41,7 +41,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         for (const legacyKey of LEGACY_KEYS) {
           try {
             await SecureStore.deleteItemAsync(legacyKey);
-          } catch (_legacyErr) {
+          } catch {
             // ignore
           }
         }
@@ -78,7 +78,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         // UI remains stable and a refetch can still update the cache.
         try {
           queryClient.setQueryData(['driverProfile'], { driver: result.driver } as any);
-        } catch (_e) {
+        } catch {
           // ignore cache set errors
         }
         // Try to register a push token for this device if notifications are enabled.
@@ -92,13 +92,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
               // Running in Expo Go — skip push registration to avoid noisy errors.
               // Developers who need push tokens should use a development build /
               // custom dev client.
-              // eslint-disable-next-line no-console
+               
               console.info('Skipping push registration: running in Expo Go. Use a dev-client for push support.');
               return;
             }
             // dynamic import so the module's top-level code doesn't run on module
             // initialization in unsupported environments.
-            // eslint-disable-next-line @typescript-eslint/no-var-requires
+             
             const Notifications: typeof import('expo-notifications') = await import('expo-notifications');
             const permission = await Notifications.getPermissionsAsync();
             let granted = permission.granted;
@@ -143,7 +143,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
           // dynamic import to avoid cycles
           const { flushDiagnostics } = await import('../utils/diagnostics');
           await flushDiagnostics(token);
-        } catch (_e) {}
+        } catch {
+          // ignore
+        }
       })();
     }, [token]);
 
@@ -156,7 +158,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     for (const legacyKey of LEGACY_KEYS) {
       try {
         await SecureStore.deleteItemAsync(legacyKey);
-      } catch (_legacyErr) {
+      } catch {
         // ignore
       }
     }
@@ -190,11 +192,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
   // need to read the current auth token outside of React (e.g. global error
   // reporters). This avoids calling React hooks outside components.
   // Tests and other modules can import `getCurrentAuthToken`.
-  // eslint-disable-next-line no-undef
+   
   try {
     // @ts-ignore - attach to module scope
     (global as any).__CURRENT_DRIVER_AUTH_TOKEN = token;
-  } catch (_e) {}
+  } catch {
+    // ignore
+  }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
@@ -211,7 +215,7 @@ export function getCurrentAuthToken(): string | null {
   try {
     // @ts-ignore
     return (global as any).__CURRENT_DRIVER_AUTH_TOKEN ?? null;
-  } catch (_e) {
+  } catch {
     return null;
   }
 }

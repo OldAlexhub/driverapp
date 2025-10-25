@@ -9,24 +9,58 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function CompletedTripsScreen() {
   const [q, setQ] = useState('');
-  const { data, isFetching, isLoading, refetch } = useDriverBookings({ status: ['Completed'] });
+  // optional filters
+  const [dateFrom, setDateFrom] = useState(''); // YYYY-MM-DD
+  const [dateTo, setDateTo] = useState(''); // YYYY-MM-DD
+  const [fareMin, setFareMin] = useState('');
+  const [fareMax, setFareMax] = useState('');
 
-  const bookings = data?.bookings ?? [];
+  const { data, isFetching, isLoading, refetch } = useDriverBookings({ status: ['Completed'] });
 
   const { data: fareData } = useDriverFare();
   const fareConfig = fareData?.fare;
 
   const filtered = useMemo(() => {
     const term = String(q || '').trim().toLowerCase();
-    if (!term) return bookings;
-    return bookings.filter((b) => {
-      const id = String(b.bookingId || b._id || '').toLowerCase();
-      const pickup = String(b.pickupAddress || '').toLowerCase();
-      const drop = String(b.dropoffAddress || '').toLowerCase();
-      const date = b.pickupTime ? dayjs(b.pickupTime).format('YYYY-MM-DD') : '';
-      return id.includes(term) || pickup.includes(term) || drop.includes(term) || date.includes(term);
+    const from = dateFrom ? dayjs(dateFrom) : null;
+    const to = dateTo ? dayjs(dateTo) : null;
+    const min = fareMin ? Number(fareMin) : null;
+    const max = fareMax ? Number(fareMax) : null;
+
+  const bk = data?.bookings ?? [];
+  return bk.filter((b) => {
+      // text search
+      if (term) {
+        const id = String(b.bookingId || b._id || '').toLowerCase();
+        const pickup = String(b.pickupAddress || '').toLowerCase();
+        const drop = String(b.dropoffAddress || '').toLowerCase();
+        const dateStr = b.pickupTime ? dayjs(b.pickupTime).format('YYYY-MM-DD') : '';
+        const textMatch = id.includes(term) || pickup.includes(term) || drop.includes(term) || dateStr.includes(term);
+        if (!textMatch) return false;
+      }
+
+      // date range filter
+      if (from || to) {
+        if (!b.pickupTime) return false;
+        const dt = dayjs(b.pickupTime);
+        if (from && dt.isBefore(from, 'day')) return false;
+        if (to && dt.isAfter(to, 'day')) return false;
+      }
+
+      // fare filter (use finalFare when present; otherwise skip or estimate)
+      if (min !== null || max !== null) {
+        const fareVal = b.finalFare !== undefined && b.finalFare !== null ? Number(b.finalFare) : null;
+        if (fareVal === null) {
+          // If finalFare not available, we'll skip the booking from results for strict filtering
+          return false;
+        }
+        if (min !== null && fareVal < min) return false;
+        if (max !== null && fareVal > max) return false;
+      }
+
+      return true;
     });
-  }, [bookings, q]);
+  }, [data?.bookings, q, dateFrom, dateTo, fareMin, fareMax]);
 
   const totalRevenue = useMemo(() => {
     return filtered.reduce((sum, b) => {
@@ -42,7 +76,7 @@ export default function CompletedTripsScreen() {
           otherFees: b.appliedFees ?? [],
         });
         return sum + Number(breakdown.total ?? 0);
-      } catch (err) {
+      } catch {
         return sum;
       }
     }, 0);
@@ -60,6 +94,42 @@ export default function CompletedTripsScreen() {
           value={q}
           onChangeText={setQ}
         />
+
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TextInput
+            placeholder="From YYYY-MM-DD"
+            placeholderTextColor="#94a3b8"
+            style={[styles.search, { flex: 1 }]}
+            value={dateFrom}
+            onChangeText={setDateFrom}
+          />
+          <TextInput
+            placeholder="To YYYY-MM-DD"
+            placeholderTextColor="#94a3b8"
+            style={[styles.search, { flex: 1 }]}
+            value={dateTo}
+            onChangeText={setDateTo}
+          />
+        </View>
+
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TextInput
+            placeholder="Fare min"
+            placeholderTextColor="#94a3b8"
+            style={[styles.search, { flex: 1 }]}
+            value={fareMin}
+            onChangeText={setFareMin}
+            keyboardType="numeric"
+          />
+          <TextInput
+            placeholder="Fare max"
+            placeholderTextColor="#94a3b8"
+            style={[styles.search, { flex: 1 }]}
+            value={fareMax}
+            onChangeText={setFareMax}
+            keyboardType="numeric"
+          />
+        </View>
       </View>
 
       <ScrollView
@@ -108,7 +178,7 @@ export default function CompletedTripsScreen() {
                               otherFees: b.appliedFees ?? [],
                             });
                             return formatCurrency(cb.total);
-                          } catch (e) {
+                          } catch {
                             return '-';
                           }
                         })()

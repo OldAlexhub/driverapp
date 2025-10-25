@@ -12,6 +12,7 @@ import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import utc from 'dayjs/plugin/utc';
 import * as Haptics from 'expo-haptics';
+import * as Linking from 'expo-linking';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -113,7 +114,7 @@ export default function DashboardScreen() {
         if (!cancelled && hos?.dutyStart) {
           setLocalDutyStart(hos.dutyStart as string);
         }
-      } catch (e) {
+      } catch {
         // ignore
       }
     })();
@@ -131,7 +132,7 @@ export default function DashboardScreen() {
       (async () => {
         try {
           await setHos({ dutyStart: activeDutyStart });
-        } catch (_e) {}
+  } catch {} 
       })();
 
       // Send HOS delta every 5 minutes (append 5 minutes on the server)
@@ -141,7 +142,7 @@ export default function DashboardScreen() {
           await appendHos(token, { date: dayjs().utc().format('YYYY-MM-DD'), minutes: 5 });
           try {
             await setHos({ dutyStart: activeDutyStart, lastReportedAt: new Date().toISOString() });
-          } catch (_e) {}
+          } catch {} 
           // also update presence minimal info for location/availability
           const loc = driverLocation.location;
           if (loc?.coords) {
@@ -189,30 +190,29 @@ export default function DashboardScreen() {
         });
         setAssignmentError(null);
         // Play a looping alert sound (expo-av) with fallback to haptics.
-        (async () => {
+            (async () => {
           try {
             // dynamic import to avoid native module issues in dev
-            // eslint-disable-next-line @typescript-eslint/no-var-requires
-            const { Audio } = require('expo-av');
+            const { Audio } = await import('expo-av');
             // stop previous sound if present
             if (assignmentSoundRef.current) {
               try {
                 await assignmentSoundRef.current.stopAsync();
                 await assignmentSoundRef.current.unloadAsync();
-              } catch (_e) {}
+              } catch {} 
               assignmentSoundRef.current = null;
             }
 
             const soundInstance = new Audio.Sound();
             // path relative to project root / assets
-            // eslint-disable-next-line global-require, @typescript-eslint/no-var-requires
+             
             const asset = require('../../../../assets/sounds/Sound_Effect.mp3');
             await soundInstance.loadAsync(asset, { shouldPlay: true, volume: 1.0 });
             // enable looping if supported
             if (typeof soundInstance.setIsLoopingAsync === 'function') {
               try {
                 await soundInstance.setIsLoopingAsync(true);
-              } catch (_e) {}
+              } catch {}
             }
             // some devices require explicit play
             if (typeof soundInstance.replayAsync === 'function') {
@@ -222,17 +222,17 @@ export default function DashboardScreen() {
             }
             assignmentSoundRef.current = soundInstance;
             return;
-          } catch (e) {
+          } catch {
             // fallback to haptics if audio can't be played
             try {
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            } catch (_) {
+            } catch {
               // ignore
             }
           }
         })();
-      } catch (e) {
-        console.warn('Error in handleAssignment', e);
+      } catch (err) {
+        console.warn('Error in handleAssignment', err);
       }
     };
 
@@ -259,12 +259,12 @@ export default function DashboardScreen() {
                 await assignmentSoundRef.current.stopAsync();
                 await assignmentSoundRef.current.unloadAsync();
               }
-            } catch (_e) {}
+            } catch {}
             assignmentSoundRef.current = null;
           })();
         }
-      } catch (e) {
-        console.warn('Error in handleAssignmentCancelled', e);
+      } catch (err) {
+        console.warn('Error in handleAssignmentCancelled', err);
       }
     };
 
@@ -273,8 +273,8 @@ export default function DashboardScreen() {
         const title = payload?.title || 'Dispatch message';
         const body = payload?.body ? ` ${payload.body}` : '';
         setFeedback(`[Dispatch] ${title}.${body}`);
-      } catch (e) {
-        console.warn('Error in handleDispatchMessage', e);
+      } catch (err) {
+        console.warn('Error in handleDispatchMessage', err);
       }
     };
 
@@ -288,12 +288,12 @@ export default function DashboardScreen() {
       socket.off('message:new', handleDispatchMessage);
       // cleanup sound on unmount
       (async () => {
-        try {
-          if (assignmentSoundRef.current) {
-            await assignmentSoundRef.current.stopAsync();
-            await assignmentSoundRef.current.unloadAsync();
-          }
-        } catch (_e) {}
+            try {
+              if (assignmentSoundRef.current) {
+                await assignmentSoundRef.current.stopAsync();
+                await assignmentSoundRef.current.unloadAsync();
+              }
+            } catch {}
         assignmentSoundRef.current = null;
       })();
     };
@@ -360,6 +360,23 @@ export default function DashboardScreen() {
 
   const isResponding = acknowledgeAssignment.isPending || declineAssignment.isPending;
 
+  // Load recent bookings (last 7 days) for earnings and gamification metrics
+  const sevenDaysFrom = dayjs().subtract(7, 'day').format('YYYY-MM-DD');
+  const today = dayjs().format('YYYY-MM-DD');
+  const {
+    data: recentBookingsData,
+  } = useDriverBookings({ from: sevenDaysFrom, to: today }, { enabled: Boolean(token) });
+
+  const recentBookings = recentBookingsData?.bookings ?? [];
+  const completedBookings = recentBookings.filter((b) => b.status === 'Completed');
+  const _totalEarnings = completedBookings.reduce((sum, b) => {
+    const base = (b.finalFare ?? b.estimatedFare ?? 0) as number;
+    const fees = (b.appliedFees ?? []).reduce((s, f) => s + (f?.amount ?? 0), 0);
+    return sum + base + fees;
+  }, 0);
+  const _tripsCount = completedBookings.length;
+  
+
   const handleAcceptAssignment = useCallback(async () => {
     if (!assignmentPrompt || isResponding) return;
     try {
@@ -369,7 +386,19 @@ export default function DashboardScreen() {
       setAssignmentPrompt(null);
       setAssignmentCountdown(0);
       setFeedback('Assignment accepted. Drive safe!');
+      // Open the meter UI
       handleOpenMeter(bookingId);
+      // If we have pickup coordinates, start navigation with one tap
+      const pickupLat = assignmentPrompt.booking?.pickupLat;
+      const pickupLon = assignmentPrompt.booking?.pickupLon;
+      if (typeof pickupLat === 'number' && typeof pickupLon === 'number') {
+        try {
+          const url = `https://www.google.com/maps/dir/?api=1&destination=${pickupLat},${pickupLon}`;
+          await Linking.openURL(url);
+        } catch (_e) {
+          // ignore; navigation is best-effort
+        }
+      }
     } catch (err) {
       setAssignmentError(err instanceof Error ? err.message : 'Unable to accept assignment.');
     }
@@ -508,9 +537,11 @@ export default function DashboardScreen() {
                 : 'You are currently offline.'}
             </Text>
           </View>
-          <Pressable onPress={signOut} style={styles.logoutButton}>
-            <Text style={styles.logoutText}>Log out</Text>
-          </Pressable>
+          <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+            <Pressable onPress={signOut} style={styles.logoutButton}>
+              <Text style={styles.logoutText}>Log out</Text>
+            </Pressable>
+          </View>
         </View>
 
         {error && (
@@ -661,20 +692,26 @@ export default function DashboardScreen() {
             {assignmentError ? <Text style={styles.assignmentError}>{assignmentError}</Text> : null}
             <View style={styles.assignmentActions}>
               <Pressable
-                style={[styles.assignmentActionButton, styles.assignmentDecline, isResponding && styles.assignmentDisabled]}
+                style={[
+                  styles.assignmentActionButton,
+                  styles.assignmentDecline,
+                  isResponding && styles.assignmentDisabled,
+                ]}
                 onPress={handleDeclineAssignment}
                 disabled={isResponding}
               >
                 <Text style={styles.assignmentActionText}>{isResponding ? '...' : 'Decline'}</Text>
               </Pressable>
               <Pressable
-                style={[styles.assignmentActionButton, styles.assignmentAccept, isResponding && styles.assignmentDisabled]}
+                style={[
+                  styles.assignmentActionButton,
+                  styles.assignmentAccept,
+                  isResponding && styles.assignmentDisabled,
+                ]}
                 onPress={handleAcceptAssignment}
                 disabled={isResponding}
               >
-                <Text style={styles.assignmentActionText}>
-                  {isResponding ? 'Processing...' : 'Accept'}
-                </Text>
+                <Text style={styles.assignmentActionText}>{isResponding ? 'Processing...' : 'Accept'}</Text>
               </Pressable>
             </View>
             <Text style={styles.assignmentCountdown}>
@@ -683,6 +720,8 @@ export default function DashboardScreen() {
           </View>
         </View>
       )}
+
+      {/* Earnings card removed — moved to Reports tab */}
     </SafeAreaView>
   );
 }
@@ -943,25 +982,24 @@ const styles = StyleSheet.create({
   },
   assignmentActionButton: {
     flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
+    paddingVertical: 20,
+    borderRadius: 14,
     alignItems: 'center',
   },
   assignmentDecline: {
-    backgroundColor: '#1f2937',
-    borderWidth: 1,
-    borderColor: '#475569',
+    backgroundColor: '#ef4444',
+    borderWidth: 0,
   },
   assignmentAccept: {
-    backgroundColor: '#2563EB',
+    backgroundColor: '#16a34a',
   },
   assignmentDisabled: {
     opacity: 0.6,
   },
   assignmentActionText: {
     color: '#f8fafc',
-    fontWeight: '700',
-    fontSize: 16,
+    fontWeight: '800',
+    fontSize: 18,
   },
   assignmentError: {
     color: '#f97316',
@@ -972,6 +1010,23 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
     fontSize: 12,
     textAlign: 'center',
+  },
+
+  earningsCard: {
+    marginTop: 12,
+  },
+  reportIssue: {
+    marginTop: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+    backgroundColor: '#0b1220',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  reportIssueText: {
+    color: '#f97316',
+    fontWeight: '700',
   },
 
 });

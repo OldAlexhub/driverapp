@@ -18,29 +18,31 @@ export default function TabsLayout() {
       }}
     >
       <Tabs.Screen
-        name='dashboard/index'
+        name="dashboard/index"
         options={{
           title: 'Dashboard',
           tabBarIcon: ({ color, size }) => (
-            <MaterialCommunityIcons name='view-dashboard-outline' color={color} size={size} />
+            <MaterialCommunityIcons name="view-dashboard-outline" color={color} size={size} />
           ),
         }}
       />
+
       <Tabs.Screen
-        name='settings/index'
+        name="settings/index"
         options={{
           title: 'Settings',
           tabBarIcon: ({ color, size }) => (
-            <MaterialCommunityIcons name='cog-outline' color={color} size={size} />
+            <MaterialCommunityIcons name="cog-outline" color={color} size={size} />
           ),
         }}
       />
+
       <Tabs.Screen
-        name='completed/index'
+        name="completed/index"
         options={{
           title: 'Completed',
           tabBarIcon: ({ color, size }) => (
-            <MaterialCommunityIcons name='history' color={color} size={size} />
+            <MaterialCommunityIcons name="history" color={color} size={size} />
           ),
         }}
       />

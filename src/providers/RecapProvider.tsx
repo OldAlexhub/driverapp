@@ -27,7 +27,9 @@ let __globalShowRecap: ((p: RecapPayload) => void) | null = null;
 export function showRecapGlobal(p: RecapPayload) {
   try {
     if (__globalShowRecap) __globalShowRecap(p);
-  } catch (_e) {}
+  } catch {
+    // ignore
+  }
 }
 
 export function RecapProvider({ children }: PropsWithChildren) {
@@ -55,7 +57,9 @@ export function RecapProvider({ children }: PropsWithChildren) {
     // After dismiss, navigate to dashboard to give driver a stable place
     try {
       router.replace('/(protected)/(tabs)/dashboard');
-    } catch (_e) {}
+    } catch {
+      // ignore
+    }
   }, [router]);
 
   return (

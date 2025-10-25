@@ -257,6 +257,10 @@ export async function listDriverBookings(
   return request<DriverBookingsResponse>(path, { token });
 }
 
+export async function getDriverBooking(token: string, bookingId: string): Promise<BookingSummary> {
+  return request<BookingSummary>(`/driver-app/bookings/${bookingId}`, { token });
+}
+
 export async function acknowledgeBooking(
   token: string,
   bookingId: string,
